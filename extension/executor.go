@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -41,6 +42,10 @@ func (e *Executor) Execute(ctx context.Context, name string, input string, chatI
 	ext, err := e.registry.Get(name)
 	if err != nil {
 		return nil, err
+	}
+
+	if ext.Manifest.Type == "command" {
+		return e.executeCommand(ctx, ext, input)
 	}
 
 	req := ExtRequest{
@@ -93,4 +98,39 @@ func (e *Executor) Execute(ctx context.Context, name string, input string, chatI
 	}
 
 	return &resp, nil
+}
+
+func (e *Executor) executeCommand(ctx context.Context, ext *Extension, input string) (*ExtResponse, error) {
+	var params map[string]string
+	if err := json.Unmarshal([]byte(input), &params); err != nil {
+		return nil, fmt.Errorf("parse command input: %w", err)
+	}
+
+	cmd := ext.Manifest.Command
+	for key, val := range params {
+		cmd = strings.ReplaceAll(cmd, "{{"+key+"}}", val)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, e.timeout)
+	defer cancel()
+
+	proc := exec.CommandContext(ctx, "sh", "-c", cmd)
+	proc.Dir = ext.Dir
+	proc.Env = os.Environ()
+
+	var stdout, stderr bytes.Buffer
+	proc.Stdout = &stdout
+	proc.Stderr = &stderr
+
+	e.logger.Info("executing command extension", "name", ext.Manifest.Name, "command", cmd)
+
+	if err := proc.Run(); err != nil {
+		return &ExtResponse{
+			Error: fmt.Sprintf("command failed: %s (stderr: %s)", err, stderr.String()),
+		}, nil
+	}
+
+	return &ExtResponse{
+		Output: strings.TrimSpace(stdout.String()),
+	}, nil
 }

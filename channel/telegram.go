@@ -3,7 +3,10 @@ package channel
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/go-telegram/bot"
@@ -13,15 +16,17 @@ import (
 type Telegram struct {
 	token        string
 	allowedUsers []int64
+	transcribe   TranscribeFn
 	logger       *slog.Logger
 	handler      MessageHandler
 	bot          *bot.Bot
 }
 
-func NewTelegram(token string, allowedUsers []int64, logger *slog.Logger) *Telegram {
+func NewTelegram(token string, allowedUsers []int64, transcribe TranscribeFn, logger *slog.Logger) *Telegram {
 	return &Telegram{
 		token:        token,
 		allowedUsers: allowedUsers,
+		transcribe:   transcribe,
 		logger:       logger,
 	}
 }
@@ -84,7 +89,20 @@ func (t *Telegram) SendTyping(ctx context.Context, chatID string) error {
 }
 
 func (t *Telegram) handleUpdate(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.Message == nil || update.Message.Text == "" {
+	if update.Message == nil {
+		return
+	}
+
+	text := update.Message.Text
+	if text == "" && update.Message.Voice != nil && t.transcribe != nil {
+		var err error
+		text, err = t.handleVoice(ctx, b, update.Message.Voice)
+		if err != nil {
+			t.logger.Error("voice transcription failed", "error", err)
+			return
+		}
+	}
+	if text == "" {
 		return
 	}
 
@@ -106,13 +124,48 @@ func (t *Telegram) handleUpdate(ctx context.Context, b *bot.Bot, update *models.
 		}
 	}
 
-	t.logger.Info("telegram message", "chat_id", chatID, "user_id", userID, "text", update.Message.Text)
+	t.logger.Info("telegram message", "chat_id", chatID, "user_id", userID, "text", text)
 
 	if t.handler != nil {
 		t.handler(Message{
 			ChatID: strconv.FormatInt(chatID, 10),
 			UserID: strconv.FormatInt(userID, 10),
-			Text:   update.Message.Text,
+			Text:   text,
 		})
 	}
+}
+
+func (t *Telegram) handleVoice(ctx context.Context, b *bot.Bot, voice *models.Voice) (string, error) {
+	file, err := b.GetFile(ctx, &bot.GetFileParams{FileID: voice.FileID})
+	if err != nil {
+		return "", fmt.Errorf("get file: %w", err)
+	}
+
+	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", t.token, file.FilePath)
+
+	resp, err := http.Get(fileURL)
+	if err != nil {
+		return "", fmt.Errorf("download voice: %w", err)
+	}
+	defer resp.Body.Close()
+
+	tmpFile, err := os.CreateTemp("", "torii-voice-*.ogg")
+	if err != nil {
+		return "", fmt.Errorf("create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		return "", fmt.Errorf("write voice file: %w", err)
+	}
+	tmpFile.Close()
+
+	text, err := t.transcribe(ctx, tmpFile.Name())
+	if err != nil {
+		return "", fmt.Errorf("transcribe: %w", err)
+	}
+
+	t.logger.Info("voice transcribed", "text", text)
+	return text, nil
 }

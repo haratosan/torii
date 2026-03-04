@@ -45,17 +45,29 @@ See `config.yaml.example` for all available options. Secrets can also be set via
 
 ## Extensions
 
-Extensions are standalone executables that communicate with Torii via stdin/stdout. They live in the `extensions/` directory. Included examples:
+Extensions are standalone executables that communicate with Torii via stdin/stdout. They live in the `extensions/` directory. Included extensions:
 
 - **torii-echo** -- echoes input back (example extension)
 - **torii-time** -- returns the current time
 - **torii-web** -- fetches web content
+
+Optional extensions can be installed separately by cloning them into `extensions/`:
+
+- **[torii-transcribe](https://github.com/haratosan/torii-transcribe)** -- transcribes audio using Whisper
 
 Build all extensions:
 
 ```sh
 make extensions
 ```
+
+Build a release package:
+
+```sh
+make release
+```
+
+This creates a `release/` directory with the binary, config example, and all extensions.
 
 ## Project Structure
 

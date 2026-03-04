@@ -12,6 +12,8 @@ type Manifest struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	Version     string         `json:"version"`
+	Type        string         `json:"type"`    // "" (default/binary) or "command"
+	Command     string         `json:"command"` // Shell command with {{param}} placeholders
 	Parameters  map[string]any `json:"parameters"`
 	Env         []string       `json:"env"`
 }
@@ -85,20 +87,28 @@ func (r *Registry) Discover(dirs []string) error {
 				continue
 			}
 
-			// Look for executable with the directory name
-			execName := entry.Name()
-			execPath := filepath.Join(extDir, execName)
-			if _, err := os.Stat(execPath); err != nil {
-				r.logger.Warn("extension executable not found", "path", execPath)
-				continue
-			}
+			if manifest.Type == "command" {
+				r.extensions[manifest.Name] = &Extension{
+					Manifest: manifest,
+					Dir:      extDir,
+				}
+				r.logger.Info("extension loaded", "name", manifest.Name, "type", "command")
+			} else {
+				// Look for executable with the directory name
+				execName := entry.Name()
+				execPath := filepath.Join(extDir, execName)
+				if _, err := os.Stat(execPath); err != nil {
+					r.logger.Warn("extension executable not found", "path", execPath)
+					continue
+				}
 
-			r.extensions[manifest.Name] = &Extension{
-				Manifest:   manifest,
-				Executable: execPath,
-				Dir:        extDir,
+				r.extensions[manifest.Name] = &Extension{
+					Manifest:   manifest,
+					Executable: execPath,
+					Dir:        extDir,
+				}
+				r.logger.Info("extension loaded", "name", manifest.Name, "path", execPath)
 			}
-			r.logger.Info("extension loaded", "name", manifest.Name, "path", execPath)
 		}
 	}
 

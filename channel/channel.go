@@ -1,6 +1,10 @@
 package channel
 
-import "context"
+import (
+	"context"
+)
+
+type TranscribeFn func(ctx context.Context, filePath string) (string, error)
 
 type Message struct {
 	ChatID string

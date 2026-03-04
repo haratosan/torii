@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -101,7 +103,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	ch := channel.NewTelegram(cfg.Telegram.Token, cfg.Telegram.AllowedUsers, logger)
+	var transcriber channel.TranscribeFn
+	if _, err := registry.Get("transcribe"); err == nil {
+		transcriber = func(ctx context.Context, filePath string) (string, error) {
+			input, _ := json.Marshal(map[string]string{"file_path": filePath})
+			resp, err := executor.Execute(ctx, "transcribe", string(input), "", "")
+			if err != nil {
+				return "", err
+			}
+			if resp.Error != "" {
+				return "", errors.New(resp.Error)
+			}
+			return resp.Output, nil
+		}
+		logger.Info("voice transcription enabled")
+	}
+
+	ch := channel.NewTelegram(cfg.Telegram.Token, cfg.Telegram.AllowedUsers, transcriber, logger)
 
 	// Setup gateway
 	gw := gateway.New(ch, ag, cfg.Gateway.AgentTimeoutDuration(), logger)
