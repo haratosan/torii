@@ -1,0 +1,27 @@
+# Binary
+torii
+
+# Database
+*.db
+
+# Config (contains secrets)
+config.yaml
+
+# Extension binaries
+extensions/torii-echo/torii-echo
+extensions/torii-time/torii-time
+extensions/torii-web/torii-web
+
+# Build
+dist/
+
+# Go
+*.exe
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

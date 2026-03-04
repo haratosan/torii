@@ -1,0 +1,10 @@
+{
+  "name": "time",
+  "description": "Returns the current date and time.",
+  "version": "0.1.0",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  }
+}

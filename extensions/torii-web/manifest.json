@@ -1,0 +1,16 @@
+{
+  "name": "web-fetch",
+  "description": "Fetches the content of a URL and returns the body text.",
+  "version": "0.1.0",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "The URL to fetch"
+      }
+    },
+    "required": ["url"]
+  },
+  "env": ["HTTP_PROXY", "HTTPS_PROXY"]
+}

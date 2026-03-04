@@ -1,0 +1,15 @@
+{
+  "name": "echo",
+  "description": "Echoes back the input text. Useful for testing.",
+  "version": "0.1.0",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "The text to echo back"
+      }
+    },
+    "required": ["text"]
+  }
+}

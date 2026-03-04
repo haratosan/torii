@@ -1,0 +1,42 @@
+gateway:
+  log_level: "info"
+  system_prompt: "You are Torii, a helpful AI assistant."
+  max_tool_rounds: 10          # max agentic tool-call rounds per message
+  agent_timeout: "5m"          # max time for agent to respond, 0 = no limit
+
+telegram:
+  token: ""                    # or TORII_TELEGRAM_TOKEN env
+  allowed_users: []            # empty = all allowed
+
+llm:
+  provider: "ollama"           # "ollama" or "openrouter"
+  ollama:
+    host: "http://localhost:11434"
+    model: "llama3.2"
+  openrouter:
+    api_key: ""                # or TORII_OPENROUTER_API_KEY env
+    model: "anthropic/claude-sonnet-4"
+
+extensions:
+  dirs: ["./extensions"]
+  timeout: "30s"
+
+session:
+  max_history: 50
+
+scheduler:
+  db_path: "torii.db"
+  interval: "30s"
+
+shell:
+  enabled: false
+  allowed_users: []             # empty = nobody allowed
+  allowed_commands: []           # empty = all commands (if user is allowed)
+  timeout: "10s"
+
+onboarding:
+  enabled: true
+  questions:
+    - "Wie soll ich dich nennen?"
+    - "Welche Sprache bevorzugst du?"
+    - "Gibt es etwas, das ich über dich wissen sollte?"

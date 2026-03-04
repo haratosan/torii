@@ -1,0 +1,123 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/haratosan/torii/agent"
+	"github.com/haratosan/torii/builtin"
+	"github.com/haratosan/torii/channel"
+	"github.com/haratosan/torii/config"
+	"github.com/haratosan/torii/extension"
+	"github.com/haratosan/torii/gateway"
+	"github.com/haratosan/torii/llm"
+	"github.com/haratosan/torii/scheduler"
+	"github.com/haratosan/torii/session"
+	"github.com/haratosan/torii/store"
+)
+
+func main() {
+	// Load config
+	cfg, err := config.Load("config.yaml")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Setup logger
+	var logLevel slog.Level
+	switch cfg.Gateway.LogLevel {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "warn":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		logLevel = slog.LevelInfo
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+
+	// Setup SQLite store
+	db, err := store.New(cfg.Scheduler.DBPath)
+	if err != nil {
+		logger.Error("database error", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+	logger.Info("database opened", "path", cfg.Scheduler.DBPath)
+
+	// Setup LLM provider
+	var provider llm.Provider
+	switch cfg.LLM.Provider {
+	case "ollama":
+		provider, err = llm.NewOllama(cfg.LLM.Ollama.Host, cfg.LLM.Ollama.Model, logger)
+		if err != nil {
+			logger.Error("ollama provider error", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("using ollama", "host", cfg.LLM.Ollama.Host, "model", cfg.LLM.Ollama.Model)
+	case "openrouter":
+		if cfg.LLM.OpenRouter.APIKey == "" {
+			logger.Error("openrouter api key required (set TORII_OPENROUTER_API_KEY or config.yaml)")
+			os.Exit(1)
+		}
+		provider = llm.NewOpenRouter(cfg.LLM.OpenRouter.APIKey, cfg.LLM.OpenRouter.Model, logger)
+		logger.Info("using openrouter", "model", cfg.LLM.OpenRouter.Model)
+	default:
+		logger.Error("unknown llm provider", "provider", cfg.LLM.Provider)
+		os.Exit(1)
+	}
+
+	// Setup extensions
+	registry := extension.NewRegistry(logger)
+	if err := registry.Discover(cfg.Extensions.Dirs); err != nil {
+		logger.Error("extension discovery error", "error", err)
+		os.Exit(1)
+	}
+
+	// Register built-in tools
+	registry.RegisterBuiltin(builtin.NewMemoryTool(db))
+	registry.RegisterBuiltin(builtin.NewBotProfileTool(db))
+	registry.RegisterBuiltin(builtin.NewShellTool(&cfg.Shell))
+	registry.RegisterBuiltin(builtin.NewRemindTool(db))
+	registry.RegisterBuiltin(builtin.NewCronTool(db))
+
+	executor := extension.NewExecutor(registry, cfg.Extensions.TimeoutDuration(), logger)
+
+	// Setup session store
+	sessions := session.NewStore(cfg.Session.MaxHistory)
+
+	// Setup agent
+	ag := agent.New(provider, executor, registry, sessions, db, cfg.Gateway.SystemPrompt, cfg.Gateway.MaxToolRounds, &cfg.Onboarding, logger)
+
+	// Setup Telegram channel
+	if cfg.Telegram.Token == "" {
+		logger.Error("telegram token required (set TORII_TELEGRAM_TOKEN or config.yaml)")
+		os.Exit(1)
+	}
+
+	ch := channel.NewTelegram(cfg.Telegram.Token, cfg.Telegram.AllowedUsers, logger)
+
+	// Setup gateway
+	gw := gateway.New(ch, ag, cfg.Gateway.AgentTimeoutDuration(), logger)
+
+	// Run with graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	// Start scheduler in background
+	sched := scheduler.New(db, ch, ag, cfg.Scheduler.IntervalDuration(), logger)
+	go sched.Run(ctx)
+
+	if err := gw.Run(ctx); err != nil {
+		logger.Error("gateway error", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("torii stopped")
+}
