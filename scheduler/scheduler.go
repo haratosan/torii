@@ -82,7 +82,7 @@ func (s *Scheduler) handleCron(ctx context.Context, task *store.Task) {
 	taskCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	reply, err := s.agent.HandleMessage(taskCtx, channel.Message{
+	result, err := s.agent.HandleMessage(taskCtx, channel.Message{
 		ChatID: task.ChatID,
 		UserID: task.UserID,
 		Text:   task.Description,
@@ -90,7 +90,7 @@ func (s *Scheduler) handleCron(ctx context.Context, task *store.Task) {
 	if err != nil {
 		s.logger.Error("scheduler: cron agent", "error", err, "task_id", task.ID)
 	} else {
-		if err := s.channel.Send(ctx, channel.Response{ChatID: task.ChatID, Text: reply}); err != nil {
+		if err := s.channel.Send(ctx, channel.Response{ChatID: task.ChatID, Text: result.Text}); err != nil {
 			s.logger.Error("scheduler: send cron result", "error", err, "task_id", task.ID)
 		}
 	}

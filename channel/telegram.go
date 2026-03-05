@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/go-telegram/bot"
@@ -55,6 +56,11 @@ func (t *Telegram) Send(ctx context.Context, resp Response) error {
 		return fmt.Errorf("invalid chat id: %w", err)
 	}
 
+	// Send photo if image path is provided
+	if resp.ImagePath != "" {
+		return t.sendPhoto(ctx, chatID, resp.ImagePath, resp.Text)
+	}
+
 	// Telegram has a 4096 character limit per message
 	text := resp.Text
 	if len(text) > 4096 {
@@ -76,6 +82,36 @@ func (t *Telegram) Send(ctx context.Context, resp Response) error {
 	return err
 }
 
+func (t *Telegram) sendPhoto(ctx context.Context, chatID int64, imagePath string, caption string) error {
+	f, err := os.Open(imagePath)
+	if err != nil {
+		return fmt.Errorf("open image: %w", err)
+	}
+	defer f.Close()
+
+	// Telegram caption limit is 1024 characters
+	if len(caption) > 1024 {
+		caption = caption[:1021] + "..."
+	}
+
+	_, err = t.bot.SendPhoto(ctx, &bot.SendPhotoParams{
+		ChatID: chatID,
+		Photo: &models.InputFileUpload{
+			Filename: filepath.Base(imagePath),
+			Data:     f,
+		},
+		Caption: caption,
+	})
+
+	// Clean up the image file after sending
+	os.Remove(imagePath)
+
+	if err != nil {
+		return fmt.Errorf("send photo: %w", err)
+	}
+	return nil
+}
+
 func (t *Telegram) SendTyping(ctx context.Context, chatID string) error {
 	id, err := strconv.ParseInt(chatID, 10, 64)
 	if err != nil {
@@ -94,7 +130,11 @@ func (t *Telegram) handleUpdate(ctx context.Context, b *bot.Bot, update *models.
 	}
 
 	text := update.Message.Text
-	if text == "" && update.Message.Voice != nil && t.transcribe != nil {
+	if text == "" && update.Message.Voice != nil {
+		if t.transcribe == nil {
+			t.logger.Warn("voice message received but no transcribe extension installed")
+			return
+		}
 		var err error
 		text, err = t.handleVoice(ctx, b, update.Message.Voice)
 		if err != nil {
@@ -102,7 +142,25 @@ func (t *Telegram) handleUpdate(ctx context.Context, b *bot.Bot, update *models.
 			return
 		}
 	}
-	if text == "" {
+
+	// Handle photo messages
+	var images [][]byte
+	if len(update.Message.Photo) > 0 {
+		// Use caption as text for photo messages
+		if text == "" {
+			text = update.Message.Caption
+		}
+		// Download highest resolution photo (last in array)
+		best := update.Message.Photo[len(update.Message.Photo)-1]
+		imgData, err := t.downloadFile(ctx, b, best.FileID)
+		if err != nil {
+			t.logger.Error("photo download failed", "error", err)
+		} else {
+			images = append(images, imgData)
+		}
+	}
+
+	if text == "" && len(images) == 0 {
 		return
 	}
 
@@ -131,6 +189,7 @@ func (t *Telegram) handleUpdate(ctx context.Context, b *bot.Bot, update *models.
 			ChatID: strconv.FormatInt(chatID, 10),
 			UserID: strconv.FormatInt(userID, 10),
 			Text:   text,
+			Images: images,
 		})
 	}
 }
@@ -168,4 +227,26 @@ func (t *Telegram) handleVoice(ctx context.Context, b *bot.Bot, voice *models.Vo
 
 	t.logger.Info("voice transcribed", "text", text)
 	return text, nil
+}
+
+func (t *Telegram) downloadFile(ctx context.Context, b *bot.Bot, fileID string) ([]byte, error) {
+	file, err := b.GetFile(ctx, &bot.GetFileParams{FileID: fileID})
+	if err != nil {
+		return nil, fmt.Errorf("get file: %w", err)
+	}
+
+	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", t.token, file.FilePath)
+
+	resp, err := http.Get(fileURL)
+	if err != nil {
+		return nil, fmt.Errorf("download file: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	return data, nil
 }

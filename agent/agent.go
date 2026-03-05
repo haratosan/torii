@@ -41,15 +41,24 @@ func New(provider llm.Provider, executor *extension.Executor, registry *extensio
 	}
 }
 
-func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (string, error) {
+// AgentResponse contains the text reply and optional metadata from tool execution.
+type AgentResponse struct {
+	Text      string
+	ImagePath string
+}
+
+func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentResponse, error) {
 	// Append user message to history
 	a.sessions.Append(msg.ChatID, llm.ChatMessage{
 		Role:    llm.RoleUser,
 		Content: msg.Text,
+		Images:  msg.Images,
 	})
 
 	// Build tool definitions from registry
 	tools := a.buildToolDefs()
+
+	var lastImagePath string
 
 	// Agent loop: LLM may request tool calls multiple times
 	for round := 0; round < a.maxToolRounds; round++ {
@@ -60,7 +69,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (string,
 			Tools:    tools,
 		})
 		if err != nil {
-			return "", fmt.Errorf("llm chat: %w", err)
+			return nil, fmt.Errorf("llm chat: %w", err)
 		}
 
 		// No tool calls → final answer
@@ -69,7 +78,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (string,
 				Role:    llm.RoleAssistant,
 				Content: resp.Content,
 			})
-			return resp.Content, nil
+			return &AgentResponse{Text: resp.Content, ImagePath: lastImagePath}, nil
 		}
 
 		// Store assistant message with tool calls
@@ -99,6 +108,13 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (string,
 				output = fmt.Sprintf("Error: %s", result.Error)
 			}
 
+			// Check for image_path in tool result data
+			if result.Data != nil {
+				if imgPath, ok := result.Data["image_path"].(string); ok && imgPath != "" {
+					lastImagePath = imgPath
+				}
+			}
+
 			a.sessions.Append(msg.ChatID, llm.ChatMessage{
 				Role:       llm.RoleTool,
 				Content:    output,
@@ -107,7 +123,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (string,
 		}
 	}
 
-	return "I've reached the maximum number of tool calls. Here's what I found so far.", nil
+	return &AgentResponse{Text: "I've reached the maximum number of tool calls. Here's what I found so far.", ImagePath: lastImagePath}, nil
 }
 
 func (a *Agent) buildMessages(chatID string, userID string) []llm.ChatMessage {

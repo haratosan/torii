@@ -35,6 +35,9 @@ func (o *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 			Role:    string(m.Role),
 			Content: m.Content,
 		}
+		for _, img := range m.Images {
+			msg.Images = append(msg.Images, api.ImageData(img))
+		}
 		if m.ToolCallID != "" {
 			msg.Role = "tool"
 		}

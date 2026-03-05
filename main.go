@@ -122,7 +122,7 @@ func main() {
 	ch := channel.NewTelegram(cfg.Telegram.Token, cfg.Telegram.AllowedUsers, transcriber, logger)
 
 	// Setup gateway
-	gw := gateway.New(ch, ag, cfg.Gateway.AgentTimeoutDuration(), logger)
+	gw := gateway.New(ch, ag, cfg.Gateway.AgentTimeoutDuration(), cfg.Extensions.Dirs, logger)
 
 	// Run with graceful shutdown
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

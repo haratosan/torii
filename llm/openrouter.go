@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,10 +37,10 @@ type orRequest struct {
 }
 
 type orMessage struct {
-	Role       string       `json:"role"`
-	Content    string       `json:"content"`
-	ToolCalls  []orToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string       `json:"tool_call_id,omitempty"`
+	Role       string          `json:"role"`
+	Content    json.RawMessage `json:"content"`
+	ToolCalls  []orToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID string          `json:"tool_call_id,omitempty"`
 }
 
 type orTool struct {
@@ -79,9 +80,27 @@ type orResponse struct {
 func (o *OpenRouterProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	messages := make([]orMessage, 0, len(req.Messages))
 	for _, m := range req.Messages {
+		var content json.RawMessage
+		if len(m.Images) > 0 {
+			parts := []any{
+				map[string]string{"type": "text", "text": m.Content},
+			}
+			for _, img := range m.Images {
+				parts = append(parts, map[string]any{
+					"type": "image_url",
+					"image_url": map[string]string{
+						"url": "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(img),
+					},
+				})
+			}
+			content, _ = json.Marshal(parts)
+		} else {
+			content, _ = json.Marshal(m.Content)
+		}
+
 		msg := orMessage{
 			Role:       string(m.Role),
-			Content:    m.Content,
+			Content:    content,
 			ToolCallID: m.ToolCallID,
 		}
 		for _, tc := range m.ToolCalls {

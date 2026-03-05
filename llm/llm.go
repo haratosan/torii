@@ -14,6 +14,7 @@ const (
 type ChatMessage struct {
 	Role       Role       `json:"role"`
 	Content    string     `json:"content"`
+	Images     [][]byte   `json:"images,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }

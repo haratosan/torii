@@ -3,36 +3,29 @@ package gateway
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/haratosan/torii/agent"
 	"github.com/haratosan/torii/channel"
 )
 
-type Message struct {
-	ChatID string
-	UserID string
-	Text   string
-}
-
-type Response struct {
-	ChatID string
-	Text   string
-}
-
 type Gateway struct {
-	agent        *agent.Agent
-	channel      channel.Channel
-	agentTimeout time.Duration
-	logger       *slog.Logger
+	agent         *agent.Agent
+	channel       channel.Channel
+	agentTimeout  time.Duration
+	extensionDirs []string
+	logger        *slog.Logger
 }
 
-func New(ch channel.Channel, ag *agent.Agent, agentTimeout time.Duration, logger *slog.Logger) *Gateway {
+func New(ch channel.Channel, ag *agent.Agent, agentTimeout time.Duration, extensionDirs []string, logger *slog.Logger) *Gateway {
 	return &Gateway{
-		agent:        ag,
-		channel:      ch,
-		agentTimeout: agentTimeout,
-		logger:       logger,
+		agent:         ag,
+		channel:       ch,
+		agentTimeout:  agentTimeout,
+		extensionDirs: extensionDirs,
+		logger:        logger,
 	}
 }
 
@@ -53,22 +46,70 @@ func (g *Gateway) Run(ctx context.Context) error {
 			agentCtx, agentCancel = context.WithTimeout(ctx, g.agentTimeout)
 		}
 
-		reply, err := g.agent.HandleMessage(agentCtx, msg)
+		result, err := g.agent.HandleMessage(agentCtx, msg)
 
 		if agentCancel != nil {
 			agentCancel()
 		}
 		stopTyping()
 
+		resp := channel.Response{ChatID: msg.ChatID}
+
 		if err != nil {
 			g.logger.Error("agent error", "error", err)
-			reply = "Sorry, something went wrong."
+			resp.Text = "Sorry, something went wrong."
+		} else {
+			resp.Text = result.Text
+			resp.ImagePath = g.validateImagePath(result.ImagePath)
 		}
 
-		if err := g.channel.Send(ctx, channel.Response{ChatID: msg.ChatID, Text: reply}); err != nil {
+		if err := g.channel.Send(ctx, resp); err != nil {
 			g.logger.Error("send error", "error", err)
 		}
 	})
+}
+
+// validateImagePath checks that the path is safe: resolves symlinks,
+// verifies it's within an allowed extension directory, and only allows
+// .png and .jpg files.
+func (g *Gateway) validateImagePath(imagePath string) string {
+	if imagePath == "" {
+		return ""
+	}
+
+	// Only allow .png and .jpg
+	ext := strings.ToLower(filepath.Ext(imagePath))
+	if ext != ".png" && ext != ".jpg" {
+		g.logger.Warn("image path rejected: invalid extension", "path", imagePath, "ext", ext)
+		return ""
+	}
+
+	// Resolve symlinks and normalize
+	resolved, err := filepath.EvalSymlinks(imagePath)
+	if err != nil {
+		g.logger.Warn("image path rejected: cannot resolve", "path", imagePath, "error", err)
+		return ""
+	}
+	resolved = filepath.Clean(resolved)
+
+	// Check that resolved path is within one of the configured extension dirs
+	for _, dir := range g.extensionDirs {
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			continue
+		}
+		absDir, err = filepath.EvalSymlinks(absDir)
+		if err != nil {
+			continue
+		}
+		// Ensure prefix check uses trailing separator to avoid partial matches
+		if strings.HasPrefix(resolved, absDir+string(filepath.Separator)) {
+			return resolved
+		}
+	}
+
+	g.logger.Warn("image path rejected: outside allowed dirs", "path", imagePath, "resolved", resolved)
+	return ""
 }
 
 func (g *Gateway) keepTyping(ctx context.Context, chatID string) {
