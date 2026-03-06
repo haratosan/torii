@@ -63,6 +63,10 @@ func (g *Gateway) Run(ctx context.Context) error {
 			resp.ImagePath = g.validateImagePath(result.ImagePath)
 		}
 
+		if resp.Text == "" && resp.ImagePath == "" {
+			resp.Text = "No response from the model."
+		}
+
 		if err := g.channel.Send(ctx, resp); err != nil {
 			g.logger.Error("send error", "error", err)
 		}
