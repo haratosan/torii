@@ -103,6 +103,7 @@ Optional extensions can be installed separately by cloning them into `extensions
 - **[torii-transcribe](https://github.com/haratosan/torii-transcribe)** -- transcribes audio using Whisper
 - **[torii-image](https://github.com/haratosan/torii-image)** -- generates or edits images via AI (OpenRouter)
 - **[torii-weather](https://github.com/haratosan/torii-weather)** -- returns current weather and forecast via Open-Meteo
+- **[torii-curl](https://github.com/haratosan/torii-curl)** -- makes HTTP requests to URLs and APIs
 
 Build all extensions:
 
