@@ -15,13 +15,15 @@ import (
 type Executor struct {
 	registry *Registry
 	timeout  time.Duration
+	envMap   map[string]string
 	logger   *slog.Logger
 }
 
-func NewExecutor(registry *Registry, timeout time.Duration, logger *slog.Logger) *Executor {
+func NewExecutor(registry *Registry, timeout time.Duration, envMap map[string]string, logger *slog.Logger) *Executor {
 	return &Executor{
 		registry: registry,
 		timeout:  timeout,
+		envMap:   envMap,
 		logger:   logger,
 	}
 }
@@ -68,8 +70,12 @@ func (e *Executor) Execute(ctx context.Context, name string, input string, chatI
 	cmd.Stdin = bytes.NewReader(reqJSON)
 
 	// Env isolation: start with empty env, only pass declared vars
+	// Config env values first, then system env overrides
 	cmd.Env = []string{}
 	for _, key := range ext.Manifest.Env {
+		if val, ok := e.envMap[key]; ok {
+			cmd.Env = append(cmd.Env, key+"="+val)
+		}
 		if val, ok := os.LookupEnv(key); ok {
 			cmd.Env = append(cmd.Env, key+"="+val)
 		}

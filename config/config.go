@@ -58,8 +58,9 @@ type OpenRouterConfig struct {
 }
 
 type ExtensionsConfig struct {
-	Dirs    []string `yaml:"dirs"`
-	Timeout string   `yaml:"timeout"`
+	Dirs    []string          `yaml:"dirs"`
+	Timeout string            `yaml:"timeout"`
+	Env     map[string]string `yaml:"env"`
 }
 
 type SessionConfig struct {

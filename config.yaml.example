@@ -20,6 +20,9 @@ llm:
 extensions:
   dirs: ["./extensions"]
   timeout: "30s"
+  env:                             # env vars passed to extensions (system env overrides these)
+    # TORII_OPENROUTER_API_KEY: ""
+    # TORII_IMAGE_MODEL: "google/gemini-3.1-flash-image-preview"
 
 session:
   max_history: 50

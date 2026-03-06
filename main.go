@@ -89,7 +89,7 @@ func main() {
 	registry.RegisterBuiltin(builtin.NewRemindTool(db))
 	registry.RegisterBuiltin(builtin.NewCronTool(db))
 
-	executor := extension.NewExecutor(registry, cfg.Extensions.TimeoutDuration(), logger)
+	executor := extension.NewExecutor(registry, cfg.Extensions.TimeoutDuration(), cfg.Extensions.Env, logger)
 
 	// Setup session store
 	sessions := session.NewStore(cfg.Session.MaxHistory)
