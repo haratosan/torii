@@ -13,6 +13,7 @@ import (
 	"github.com/haratosan/torii/agent"
 	"github.com/haratosan/torii/builtin"
 	"github.com/haratosan/torii/channel"
+	"github.com/haratosan/torii/cmd"
 	"github.com/haratosan/torii/config"
 	"github.com/haratosan/torii/extension"
 	"github.com/haratosan/torii/gateway"
@@ -23,8 +24,40 @@ import (
 )
 
 func main() {
-	// Load config
-	cfg, err := config.Load("config.yaml")
+	// Handle service subcommands
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "start":
+			cmd.Start()
+			return
+		case "stop":
+			cmd.Stop()
+			return
+		case "restart":
+			cmd.Restart()
+			return
+		case "status":
+			cmd.Status()
+			return
+		case "logs":
+			cmd.Logs()
+			return
+		default:
+			cmd.Usage()
+		}
+	}
+
+	// Load config: try CWD first, then ~/.config/torii/
+	configPath := "config.yaml"
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		if home, err := os.UserHomeDir(); err == nil {
+			candidate := home + "/.config/torii/config.yaml"
+			if _, err := os.Stat(candidate); err == nil {
+				configPath = candidate
+			}
+		}
+	}
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		os.Exit(1)

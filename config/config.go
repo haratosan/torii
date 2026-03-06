@@ -127,7 +127,7 @@ func Load(path string) (*Config, error) {
 			},
 		},
 		Extensions: ExtensionsConfig{
-			Dirs:    []string{"./extensions"},
+			Dirs:    []string{"./extensions", "~/.local/share/torii/extensions"},
 			Timeout: "30s",
 		},
 		Session: SessionConfig{

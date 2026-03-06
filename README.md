@@ -50,6 +50,46 @@ Extension-specific environment variables (e.g. `TORII_OPENROUTER_API_KEY`, `TORI
 | `TORII_OPENROUTER_MODEL`   | OpenRouter model name    |
 | `TORII_LOG_LEVEL`          | Log level (e.g. `debug`) |
 
+## Install / Uninstall
+
+Install torii system-wide (per-user) with autostart:
+
+```sh
+make install
+```
+
+This will:
+
+- Build the binary and extensions
+- Copy everything to `~/.local/share/torii/`
+- Copy `config.yaml.example` to `~/.config/torii/config.yaml` (if not present)
+- Create a symlink at `~/.local/bin/torii`
+- Set up autostart via **systemd** (Linux) or **launchd** (macOS)
+
+Make sure `~/.local/bin` is in your `PATH`. Edit `~/.config/torii/config.yaml` before starting.
+
+### Service Commands
+
+After installation, manage the service with:
+
+```sh
+torii start     # Start the service
+torii stop      # Stop the service
+torii restart   # Restart the service
+torii status    # Show service status
+torii logs      # Tail service logs
+```
+
+Running `torii` without a command starts the bot directly (foreground).
+
+To remove:
+
+```sh
+make uninstall
+```
+
+This stops the service, removes the binary and extensions, but preserves your config at `~/.config/torii/`.
+
 ## Extensions
 
 Extensions are standalone executables that communicate with Torii via stdin/stdout. They live in the `extensions/` directory. Included extensions:
@@ -83,6 +123,7 @@ This creates a `release/` directory with the binary, config example, and all ext
 ```
 main.go          -- entrypoint
 agent/           -- agentic tool-calling loop
+cmd/             -- CLI subcommands (service management)
 builtin/         -- built-in tools (memory, shell, remind, cron, ...)
 channel/         -- messaging channels (Telegram)
 config/          -- YAML config loading
