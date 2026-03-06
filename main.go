@@ -107,7 +107,7 @@ func main() {
 	if _, err := registry.Get("transcribe"); err == nil {
 		transcriber = func(ctx context.Context, filePath string) (string, error) {
 			input, _ := json.Marshal(map[string]string{"file_path": filePath})
-			resp, err := executor.Execute(ctx, "transcribe", string(input), "", "")
+			resp, err := executor.Execute(ctx, "transcribe", string(input), "", "", nil)
 			if err != nil {
 				return "", err
 			}

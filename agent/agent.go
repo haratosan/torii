@@ -58,6 +58,9 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 	// Build tool definitions from registry
 	tools := a.buildToolDefs()
 
+	// Keep user images for passing to tool executions
+	userImages := msg.Images
+
 	var lastImagePath string
 
 	// Agent loop: LLM may request tool calls multiple times
@@ -92,7 +95,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 		for _, tc := range resp.ToolCalls {
 			a.logger.Info("tool call", "name", tc.Function.Name, "args", tc.Function.Arguments)
 
-			result, err := a.executor.Execute(ctx, tc.Function.Name, tc.Function.Arguments, msg.ChatID, msg.UserID)
+			result, err := a.executor.Execute(ctx, tc.Function.Name, tc.Function.Arguments, msg.ChatID, msg.UserID, userImages)
 			if err != nil {
 				a.logger.Error("tool execution failed", "name", tc.Function.Name, "error", err)
 				a.sessions.Append(msg.ChatID, llm.ChatMessage{

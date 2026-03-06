@@ -3,6 +3,7 @@ package extension
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -28,7 +29,7 @@ func NewExecutor(registry *Registry, timeout time.Duration, envMap map[string]st
 	}
 }
 
-func (e *Executor) Execute(ctx context.Context, name string, input string, chatID string, userID string) (*ExtResponse, error) {
+func (e *Executor) Execute(ctx context.Context, name string, input string, chatID string, userID string, images [][]byte) (*ExtResponse, error) {
 	// Check builtins first
 	if bt, ok := e.registry.GetBuiltin(name); ok {
 		req := ExtRequest{
@@ -50,11 +51,17 @@ func (e *Executor) Execute(ctx context.Context, name string, input string, chatI
 		return e.executeCommand(ctx, ext, input)
 	}
 
+	var b64Images []string
+	for _, img := range images {
+		b64Images = append(b64Images, base64.StdEncoding.EncodeToString(img))
+	}
+
 	req := ExtRequest{
 		Action: name,
 		Input:  input,
 		ChatID: chatID,
 		UserID: userID,
+		Images: b64Images,
 	}
 
 	reqJSON, err := json.Marshal(req)

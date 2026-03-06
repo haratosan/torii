@@ -19,10 +19,11 @@ type Manifest struct {
 }
 
 type ExtRequest struct {
-	Action string `json:"action"`
-	Input  string `json:"input"`
-	ChatID string `json:"chat_id"`
-	UserID string `json:"user_id"`
+	Action string   `json:"action"`
+	Input  string   `json:"input"`
+	ChatID string   `json:"chat_id"`
+	UserID string   `json:"user_id"`
+	Images []string `json:"images,omitempty"`
 }
 
 type ExtResponse struct {
