@@ -36,12 +36,19 @@ make run
 
 ## Configuration
 
-See `config.yaml.example` for all available options. Secrets can also be set via environment variables:
+See `config.yaml.example` for all available options. All settings can be configured in `config.yaml` or overridden via environment variables:
 
-| Variable                  | Description            |
-|---------------------------|------------------------|
-| `TORII_TELEGRAM_TOKEN`    | Telegram bot token     |
-| `TORII_OPENROUTER_API_KEY`| OpenRouter API key     |
+Extension-specific environment variables (e.g. `TORII_OPENROUTER_API_KEY`, `TORII_IMAGE_MODEL`) can also be set under `extensions.env` in `config.yaml`.
+
+| Variable                   | Description              |
+|----------------------------|--------------------------|
+| `TORII_TELEGRAM_TOKEN`     | Telegram bot token       |
+| `TORII_LLM_PROVIDER`      | `ollama` or `openrouter` |
+| `TORII_OLLAMA_HOST`        | Ollama API URL           |
+| `TORII_OLLAMA_MODEL`       | Ollama model name        |
+| `TORII_OPENROUTER_API_KEY` | OpenRouter API key       |
+| `TORII_OPENROUTER_MODEL`   | OpenRouter model name    |
+| `TORII_LOG_LEVEL`          | Log level (e.g. `debug`) |
 
 ## Extensions
 
@@ -54,6 +61,8 @@ Extensions are standalone executables that communicate with Torii via stdin/stdo
 Optional extensions can be installed separately by cloning them into `extensions/`:
 
 - **[torii-transcribe](https://github.com/haratosan/torii-transcribe)** -- transcribes audio using Whisper
+- **[torii-image](https://github.com/haratosan/torii-image)** -- generates or edits images via AI (OpenRouter)
+- **[torii-weather](https://github.com/haratosan/torii-weather)** -- returns current weather and forecast via Open-Meteo
 
 Build all extensions:
 
