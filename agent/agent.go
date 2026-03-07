@@ -93,6 +93,16 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 
 		// Execute each tool call
 		for _, tc := range resp.ToolCalls {
+			if tc.Function.Name == "" {
+				a.logger.Warn("skipping tool call with empty name", "args", tc.Function.Arguments)
+				a.sessions.Append(msg.ChatID, llm.ChatMessage{
+					Role:       llm.RoleTool,
+					Content:    "Error: tool call had an empty function name. Please retry with the correct function name.",
+					ToolCallID: tc.ID,
+				})
+				continue
+			}
+
 			a.logger.Info("tool call", "name", tc.Function.Name, "args", tc.Function.Arguments)
 
 			result, err := a.executor.Execute(ctx, tc.Function.Name, tc.Function.Arguments, msg.ChatID, msg.UserID, userImages)

@@ -32,6 +32,7 @@ install: build
 	@echo "Installing torii..."
 	@mkdir -p "$(INSTALL_DIR)/extensions" "$(CONFIG_DIR)" "$(BIN_DIR)"
 	@cp torii "$(INSTALL_DIR)/torii"
+	@codesign -s - "$(INSTALL_DIR)/torii" 2>/dev/null || true
 	@for dir in extensions/*/; do \
 		name=$$(basename "$$dir"); \
 		mkdir -p "$(INSTALL_DIR)/extensions/$$name"; \
