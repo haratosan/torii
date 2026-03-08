@@ -10,6 +10,7 @@ An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or
 - **Built-in tools** -- memory, bot profile, shell access, reminders, cron jobs
 - **Scheduler** -- run reminders and cron tasks in the background
 - **Session management** -- per-user conversation history
+- **Bot commands** -- `/new`, `/status`, `/system`, `/help`
 - **Onboarding** -- configurable welcome questions for new users
 
 ## Requirements
@@ -89,6 +90,17 @@ make uninstall
 ```
 
 This stops the service, removes the binary and extensions, but preserves your config at `~/.config/torii/`.
+
+## Bot Commands
+
+These Telegram commands are handled directly by the bot without going through the LLM:
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Clear the current session and start fresh |
+| `/status` | Show session message count, LLM provider, and model |
+| `/system` | Show the current system prompt |
+| `/help` | List available commands |
 
 ## Extensions
 

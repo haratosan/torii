@@ -53,6 +53,16 @@ func (s *Store) Append(chatID string, msgs ...llm.ChatMessage) {
 	}
 }
 
+func (s *Store) Clear(chatID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, chatID)
+}
+
+func (s *Store) MaxHistory() int {
+	return s.maxHistory
+}
+
 func (s *Store) History(chatID string) []llm.ChatMessage {
 	sess := s.Get(chatID)
 	s.mu.RLock()

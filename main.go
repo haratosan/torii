@@ -128,7 +128,16 @@ func main() {
 	sessions := session.NewStore(cfg.Session.MaxHistory)
 
 	// Setup agent
-	ag := agent.New(provider, executor, registry, sessions, db, cfg.Gateway.SystemPrompt, cfg.Gateway.MaxToolRounds, &cfg.Onboarding, logger)
+	// Determine model name based on provider
+	var modelName string
+	switch cfg.LLM.Provider {
+	case "ollama":
+		modelName = cfg.LLM.Ollama.Model
+	case "openrouter":
+		modelName = cfg.LLM.OpenRouter.Model
+	}
+
+	ag := agent.New(provider, executor, registry, sessions, db, cfg.Gateway.SystemPrompt, cfg.Gateway.MaxToolRounds, &cfg.Onboarding, cfg.LLM.Provider, modelName, logger)
 
 	// Setup Telegram channel
 	if cfg.Telegram.Token == "" {

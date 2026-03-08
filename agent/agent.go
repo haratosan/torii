@@ -24,10 +24,12 @@ type Agent struct {
 	systemPrompt  string
 	maxToolRounds int
 	onboarding    *config.OnboardingConfig
+	providerName  string
+	modelName     string
 	logger        *slog.Logger
 }
 
-func New(provider llm.Provider, executor *extension.Executor, registry *extension.Registry, sessions *session.Store, db *store.Store, systemPrompt string, maxToolRounds int, onboarding *config.OnboardingConfig, logger *slog.Logger) *Agent {
+func New(provider llm.Provider, executor *extension.Executor, registry *extension.Registry, sessions *session.Store, db *store.Store, systemPrompt string, maxToolRounds int, onboarding *config.OnboardingConfig, providerName string, modelName string, logger *slog.Logger) *Agent {
 	return &Agent{
 		provider:      provider,
 		executor:      executor,
@@ -37,6 +39,8 @@ func New(provider llm.Provider, executor *extension.Executor, registry *extensio
 		systemPrompt:  systemPrompt,
 		maxToolRounds: maxToolRounds,
 		onboarding:    onboarding,
+		providerName:  providerName,
+		modelName:     modelName,
 		logger:        logger,
 	}
 }
@@ -45,6 +49,29 @@ func New(provider llm.Provider, executor *extension.Executor, registry *extensio
 type AgentResponse struct {
 	Text      string
 	ImagePath string
+}
+
+func (a *Agent) HandleCommand(msg channel.Message) (string, bool) {
+	if !strings.HasPrefix(msg.Text, "/") {
+		return "", false
+	}
+	cmd := strings.TrimSpace(msg.Text)
+	switch cmd {
+	case "/new":
+		a.sessions.Clear(msg.ChatID)
+		return "Session cleared.", true
+	case "/status":
+		count := len(a.sessions.History(msg.ChatID))
+		text := fmt.Sprintf("Messages in session: %d/%d\nProvider: %s\nModel: %s",
+			count, a.sessions.MaxHistory(), a.providerName, a.modelName)
+		return text, true
+	case "/system":
+		prompt := a.buildSystemPrompt(msg.UserID)
+		return prompt, true
+	case "/help":
+		return "/new — Start new session\n/status — Show bot info\n/system — Show system prompt\n/help — Show commands", true
+	}
+	return "", false
 }
 
 func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentResponse, error) {

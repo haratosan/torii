@@ -35,6 +35,14 @@ func (g *Gateway) Run(ctx context.Context) error {
 	return g.channel.Start(ctx, func(msg channel.Message) {
 		g.logger.Info("message received", "chat_id", msg.ChatID, "user_id", msg.UserID)
 
+		// Handle bot commands
+		if resp, ok := g.agent.HandleCommand(msg); ok {
+			if err := g.channel.Send(ctx, channel.Response{ChatID: msg.ChatID, Text: resp}); err != nil {
+				g.logger.Error("send error", "error", err)
+			}
+			return
+		}
+
 		// Start typing indicator
 		typingCtx, stopTyping := context.WithCancel(ctx)
 		go g.keepTyping(typingCtx, msg.ChatID)
