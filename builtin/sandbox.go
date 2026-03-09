@@ -20,23 +20,47 @@ import (
 const containerName = "torii-sandbox"
 
 type sandboxManager struct {
-	cfg      *config.SandboxConfig
-	mu       sync.Mutex
-	lastUsed time.Time
-	running  bool
-	stopCh   chan struct{}
-	logger   *slog.Logger
+	cfg          *config.SandboxConfig
+	containerBin string // absolute path to container CLI
+	mu           sync.Mutex
+	lastUsed     time.Time
+	running      bool
+	stopCh       chan struct{}
+	logger       *slog.Logger
 }
 
 type sandboxArgs struct {
 	Command string `json:"command"`
 }
 
+// lookupContainerBin finds the container CLI binary, checking common
+// Homebrew paths in addition to $PATH (services often have a minimal PATH).
+func lookupContainerBin() (string, error) {
+	if p, err := exec.LookPath("container"); err == nil {
+		return p, nil
+	}
+	for _, p := range []string{"/opt/homebrew/bin/container", "/usr/local/bin/container"} {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("container CLI not found (install with: brew install container)")
+}
+
 func NewSandboxTool(cfg *config.SandboxConfig, logger *slog.Logger) (*extension.BuiltinTool, *sandboxManager) {
+	bin, err := lookupContainerBin()
+	if err != nil {
+		logger.Warn("sandbox: container CLI not found, tool will fail at runtime", "error", err)
+		bin = "container" // fallback, will produce a clear error
+	} else {
+		logger.Info("sandbox: found container CLI", "path", bin)
+	}
+
 	mgr := &sandboxManager{
-		cfg:    cfg,
-		stopCh: make(chan struct{}),
-		logger: logger,
+		cfg:          cfg,
+		containerBin: bin,
+		stopCh:       make(chan struct{}),
+		logger:       logger,
 	}
 
 	go mgr.idleWatcher()
@@ -94,14 +118,14 @@ func (m *sandboxManager) resolveSharedDir() string {
 
 func (m *sandboxManager) ensureRunning() error {
 	// Check if container is already running
-	out, err := exec.Command("container", "inspect", containerName).CombinedOutput()
+	out, err := exec.Command(m.containerBin, "inspect", containerName).CombinedOutput()
 	if err == nil && strings.Contains(string(out), containerName) {
 		m.running = true
 		return nil
 	}
 
 	// Remove stale container if it exists
-	exec.Command("container", "rm", "-f", containerName).Run()
+	exec.Command(m.containerBin, "rm", "-f", containerName).Run()
 
 	sharedDir := m.resolveSharedDir()
 	if err := os.MkdirAll(sharedDir, 0755); err != nil {
@@ -110,7 +134,7 @@ func (m *sandboxManager) ensureRunning() error {
 
 	m.logger.Info("starting sandbox container", "image", m.cfg.Image, "shared_dir", sharedDir)
 
-	cmd := exec.Command("container",
+	cmd := exec.Command(m.containerBin,
 		"run", "-d",
 		"--name", containerName,
 		"-v", sharedDir+":/shared",
@@ -143,10 +167,10 @@ func (m *sandboxManager) execute(ctx context.Context, command, chatID string) (s
 	workdir := "/shared"
 	if chatID != "" {
 		workdir = "/shared/" + chatID
-		exec.CommandContext(ctx, "container", "exec", containerName, "mkdir", "-p", workdir).Run()
+		exec.CommandContext(ctx, m.containerBin, "exec", containerName, "mkdir", "-p", workdir).Run()
 	}
 
-	cmd := exec.CommandContext(ctx, "container", "exec", "-w", workdir, containerName, "sh", "-c", command)
+	cmd := exec.CommandContext(ctx, m.containerBin, "exec", "-w", workdir, containerName, "sh", "-c", command)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -186,8 +210,8 @@ func (m *sandboxManager) idleWatcher() {
 			m.mu.Lock()
 			if m.running && !m.lastUsed.IsZero() && time.Since(m.lastUsed) > m.cfg.IdleTimeoutDuration() {
 				m.logger.Info("stopping idle sandbox container")
-				exec.Command("container", "stop", containerName).Run()
-				exec.Command("container", "rm", containerName).Run()
+				exec.Command(m.containerBin, "stop", containerName).Run()
+				exec.Command(m.containerBin, "rm", containerName).Run()
 				m.running = false
 			}
 			m.mu.Unlock()
@@ -204,8 +228,8 @@ func (m *sandboxManager) Shutdown() {
 
 	if m.running {
 		m.logger.Info("shutting down sandbox container")
-		exec.Command("container", "stop", containerName).Run()
-		exec.Command("container", "rm", containerName).Run()
+		exec.Command(m.containerBin, "stop", containerName).Run()
+		exec.Command(m.containerBin, "rm", containerName).Run()
 		m.running = false
 	}
 }
