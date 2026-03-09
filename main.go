@@ -122,6 +122,12 @@ func main() {
 	registry.RegisterBuiltin(builtin.NewRemindTool(db))
 	registry.RegisterBuiltin(builtin.NewCronTool(db))
 
+	if cfg.Sandbox.Enabled {
+		sandboxTool, sandboxMgr := builtin.NewSandboxTool(&cfg.Sandbox, logger)
+		registry.RegisterBuiltin(sandboxTool)
+		defer sandboxMgr.Shutdown()
+	}
+
 	executor := extension.NewExecutor(registry, cfg.Extensions.TimeoutDuration(), cfg.Extensions.Env, logger)
 
 	// Setup session store

@@ -7,7 +7,7 @@ An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or
 - **Telegram integration** -- chat with your AI assistant via Telegram
 - **Multiple LLM backends** -- Ollama (local) or OpenRouter (cloud)
 - **Extension system** -- add custom tools as standalone executables
-- **Built-in tools** -- memory, bot profile, shell access, reminders, cron jobs
+- **Built-in tools** -- memory, bot profile, shell access, sandbox (containerized), reminders, cron jobs
 - **Scheduler** -- run reminders and cron tasks in the background
 - **Session management** -- per-user conversation history
 - **Bot commands** -- `/new`, `/status`, `/system`, `/help`
@@ -18,6 +18,7 @@ An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or
 - Go 1.24+
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
 - Ollama running locally, or an OpenRouter API key
+- (Optional) Apple Containers for sandbox: `brew install container` and `container system start`
 
 ## Setup
 

@@ -15,6 +15,7 @@ type Config struct {
 	Session    SessionConfig    `yaml:"session"`
 	Scheduler  SchedulerConfig  `yaml:"scheduler"`
 	Shell      ShellConfig      `yaml:"shell"`
+	Sandbox    SandboxConfig    `yaml:"sandbox"`
 	Onboarding OnboardingConfig `yaml:"onboarding"`
 }
 
@@ -95,6 +96,21 @@ func (c *ShellConfig) TimeoutDuration() time.Duration {
 	return d
 }
 
+type SandboxConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	Image       string `yaml:"image"`
+	SharedDir   string `yaml:"shared_dir"`
+	IdleTimeout string `yaml:"idle_timeout"`
+}
+
+func (c *SandboxConfig) IdleTimeoutDuration() time.Duration {
+	d, err := time.ParseDuration(c.IdleTimeout)
+	if err != nil {
+		return 10 * time.Minute
+	}
+	return d
+}
+
 type OnboardingConfig struct {
 	Enabled   bool     `yaml:"enabled"`
 	Questions []string `yaml:"questions"`
@@ -140,6 +156,12 @@ func Load(path string) (*Config, error) {
 		Shell: ShellConfig{
 			Enabled: false,
 			Timeout: "10s",
+		},
+		Sandbox: SandboxConfig{
+			Enabled:     false,
+			Image:       "alpine:latest",
+			SharedDir:   "~/torii-sandbox",
+			IdleTimeout: "10m",
 		},
 		Onboarding: OnboardingConfig{
 			Enabled: false,

@@ -37,6 +37,12 @@ shell:
   allowed_commands: []           # empty = all commands (if user is allowed)
   timeout: "10s"
 
+sandbox:
+  enabled: false                 # requires: brew install container && container system start
+  image: "alpine:latest"
+  shared_dir: "~/torii-sandbox"  # host dir mounted as /shared in container
+  idle_timeout: "10m"            # stop container after this idle period
+
 onboarding:
   enabled: true
   questions:
