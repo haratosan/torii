@@ -17,14 +17,18 @@ import (
 	"github.com/haratosan/torii/extension"
 )
 
-const containerName = "torii-sandbox"
+const containerPrefix = "torii-sandbox-"
+
+type containerState struct {
+	running  bool
+	lastUsed time.Time
+}
 
 type sandboxManager struct {
 	cfg          *config.SandboxConfig
 	containerBin string // absolute path to container CLI
 	mu           sync.Mutex
-	lastUsed     time.Time
-	running      bool
+	containers   map[string]*containerState // chatID → state
 	stopCh       chan struct{}
 	logger       *slog.Logger
 }
@@ -59,6 +63,7 @@ func NewSandboxTool(cfg *config.SandboxConfig, logger *slog.Logger) (*extension.
 	mgr := &sandboxManager{
 		cfg:          cfg,
 		containerBin: bin,
+		containers:   make(map[string]*containerState),
 		stopCh:       make(chan struct{}),
 		logger:       logger,
 	}
@@ -68,7 +73,7 @@ func NewSandboxTool(cfg *config.SandboxConfig, logger *slog.Logger) (*extension.
 	tool := &extension.BuiltinTool{
 		Def: extension.Manifest{
 			Name:        "sandbox",
-			Description: "Execute shell commands in an isolated Linux container. Use this to install packages (apk add), run scripts, compile code, and create files. Each chat has its own working directory. Files persist across commands.",
+			Description: "Execute shell commands in an isolated Linux container. Use this to install packages (apk add), run scripts, compile code, and create files. Each chat has its own isolated container with a persistent /workspace directory.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -116,28 +121,48 @@ func (m *sandboxManager) resolveSharedDir() string {
 	return dir
 }
 
-func (m *sandboxManager) ensureRunning() error {
-	// Check if container is already running
-	out, err := exec.Command(m.containerBin, "inspect", containerName).CombinedOutput()
-	if err == nil && strings.Contains(string(out), containerName) {
-		m.running = true
+func (m *sandboxManager) containerName(chatID string) string {
+	return containerPrefix + chatID
+}
+
+func (m *sandboxManager) ensureRunning(chatID string) error {
+	name := m.containerName(chatID)
+
+	// Check if we already know it's running
+	if cs, ok := m.containers[chatID]; ok && cs.running {
+		// Verify it's actually still running
+		out, err := exec.Command(m.containerBin, "inspect", name).CombinedOutput()
+		if err == nil && strings.Contains(string(out), name) {
+			return nil
+		}
+		cs.running = false
+	}
+
+	// Check if container exists but we don't know about it
+	out, err := exec.Command(m.containerBin, "inspect", name).CombinedOutput()
+	if err == nil && strings.Contains(string(out), name) {
+		if m.containers[chatID] == nil {
+			m.containers[chatID] = &containerState{}
+		}
+		m.containers[chatID].running = true
 		return nil
 	}
 
 	// Remove stale container if it exists
-	exec.Command(m.containerBin, "rm", "-f", containerName).Run()
+	exec.Command(m.containerBin, "rm", "-f", name).Run()
 
-	sharedDir := m.resolveSharedDir()
-	if err := os.MkdirAll(sharedDir, 0755); err != nil {
-		return fmt.Errorf("create shared dir: %w", err)
+	// Create host directory for this chat
+	chatDir := filepath.Join(m.resolveSharedDir(), chatID)
+	if err := os.MkdirAll(chatDir, 0755); err != nil {
+		return fmt.Errorf("create chat dir: %w", err)
 	}
 
-	m.logger.Info("starting sandbox container", "image", m.cfg.Image, "shared_dir", sharedDir)
+	m.logger.Info("starting sandbox container", "name", name, "image", m.cfg.Image, "chat_dir", chatDir)
 
 	cmd := exec.Command(m.containerBin,
 		"run", "-d",
-		"--name", containerName,
-		"-v", sharedDir+":/shared",
+		"--name", name,
+		"-v", chatDir+":/workspace",
 		m.cfg.Image,
 		"sleep", "infinity",
 	)
@@ -148,29 +173,27 @@ func (m *sandboxManager) ensureRunning() error {
 		return fmt.Errorf("start container: %s (%w)", stderr.String(), err)
 	}
 
-	m.running = true
-	m.logger.Info("sandbox container started")
+	m.containers[chatID] = &containerState{running: true}
+	m.logger.Info("sandbox container started", "name", name)
 	return nil
 }
 
 func (m *sandboxManager) execute(ctx context.Context, command, chatID string) (string, error) {
+	if chatID == "" {
+		return "", fmt.Errorf("chatID is required for sandbox execution")
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if err := m.ensureRunning(); err != nil {
+	if err := m.ensureRunning(chatID); err != nil {
 		return "", err
 	}
 
-	m.lastUsed = time.Now()
+	m.containers[chatID].lastUsed = time.Now()
 
-	// Ensure chat workdir exists inside the container
-	workdir := "/shared"
-	if chatID != "" {
-		workdir = "/shared/" + chatID
-		exec.CommandContext(ctx, m.containerBin, "exec", containerName, "mkdir", "-p", workdir).Run()
-	}
-
-	cmd := exec.CommandContext(ctx, m.containerBin, "exec", "-w", workdir, containerName, "sh", "-c", command)
+	name := m.containerName(chatID)
+	cmd := exec.CommandContext(ctx, m.containerBin, "exec", "-w", "/workspace", name, "sh", "-c", command)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -208,11 +231,15 @@ func (m *sandboxManager) idleWatcher() {
 		select {
 		case <-ticker.C:
 			m.mu.Lock()
-			if m.running && !m.lastUsed.IsZero() && time.Since(m.lastUsed) > m.cfg.IdleTimeoutDuration() {
-				m.logger.Info("stopping idle sandbox container")
-				exec.Command(m.containerBin, "stop", containerName).Run()
-				exec.Command(m.containerBin, "rm", containerName).Run()
-				m.running = false
+			timeout := m.cfg.IdleTimeoutDuration()
+			for chatID, cs := range m.containers {
+				if cs.running && !cs.lastUsed.IsZero() && time.Since(cs.lastUsed) > timeout {
+					name := m.containerName(chatID)
+					m.logger.Info("stopping idle sandbox container", "name", name)
+					exec.Command(m.containerBin, "stop", name).Run()
+					exec.Command(m.containerBin, "rm", name).Run()
+					cs.running = false
+				}
 			}
 			m.mu.Unlock()
 		case <-m.stopCh:
@@ -226,10 +253,13 @@ func (m *sandboxManager) Shutdown() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.running {
-		m.logger.Info("shutting down sandbox container")
-		exec.Command(m.containerBin, "stop", containerName).Run()
-		exec.Command(m.containerBin, "rm", containerName).Run()
-		m.running = false
+	for chatID, cs := range m.containers {
+		if cs.running {
+			name := m.containerName(chatID)
+			m.logger.Info("shutting down sandbox container", "name", name)
+			exec.Command(m.containerBin, "stop", name).Run()
+			exec.Command(m.containerBin, "rm", name).Run()
+			cs.running = false
+		}
 	}
 }
