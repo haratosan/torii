@@ -178,20 +178,23 @@ func (a *Agent) buildMessages(chatID string, userID string) []llm.ChatMessage {
 func (a *Agent) buildSystemPrompt(userID string) string {
 	var sb strings.Builder
 
-	// Bot profile from DB (overrides config system_prompt)
+	// Config system prompt is always the base
+	sb.WriteString(a.systemPrompt)
+	sb.WriteString("\n")
+
+	// Bot profile from DB (extends the base prompt)
 	profile, _ := a.store.GetAllBotProfile()
 	if name := profile["name"]; name != "" {
-		sb.WriteString(fmt.Sprintf("Your name is %s.\n", name))
+		sb.WriteString(fmt.Sprintf("\nYour name is %s.\n", name))
 	}
 	if personality := profile["personality"]; personality != "" {
+		sb.WriteString("\n")
 		sb.WriteString(personality)
 		sb.WriteString("\n")
 	}
 	if sysPrompt := profile["system_prompt"]; sysPrompt != "" {
-		sb.WriteString(sysPrompt)
 		sb.WriteString("\n")
-	} else {
-		sb.WriteString(a.systemPrompt)
+		sb.WriteString(sysPrompt)
 		sb.WriteString("\n")
 	}
 

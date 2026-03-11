@@ -20,7 +20,7 @@ func NewBotProfileTool(db *store.Store) *extension.BuiltinTool {
 	return &extension.BuiltinTool{
 		Def: extension.Manifest{
 			Name:        "bot-profile",
-			Description: "Get or set the bot's identity. Actions: get (show current profile), set (update a profile key). Keys: name, personality, system_prompt.",
+			Description: "Get or set the bot's identity. Actions: get (show current profile), set (update a profile key). Keys: name, personality, system_prompt. Note: these extend (not replace) the base system prompt from the config.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
