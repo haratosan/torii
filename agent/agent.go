@@ -49,6 +49,7 @@ func New(provider llm.Provider, executor *extension.Executor, registry *extensio
 type AgentResponse struct {
 	Text      string
 	ImagePath string
+	Silent    bool
 }
 
 func (a *Agent) HandleCommand(msg channel.Message) (string, bool) {
@@ -89,6 +90,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 	userImages := msg.Images
 
 	var lastImagePath string
+	var silent bool
 
 	// Agent loop: LLM may request tool calls multiple times
 	for round := 0; round < a.maxToolRounds; round++ {
@@ -108,7 +110,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 				Role:    llm.RoleAssistant,
 				Content: resp.Content,
 			})
-			return &AgentResponse{Text: resp.Content, ImagePath: lastImagePath}, nil
+			return &AgentResponse{Text: resp.Content, ImagePath: lastImagePath, Silent: silent}, nil
 		}
 
 		// Store assistant message with tool calls
@@ -120,6 +122,10 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 
 		// Execute each tool call
 		for _, tc := range resp.ToolCalls {
+			if tc.Function.Name == "no-reply" {
+				silent = true
+			}
+
 			if tc.Function.Name == "" {
 				a.logger.Warn("skipping tool call with empty name", "args", tc.Function.Arguments)
 				a.sessions.Append(msg.ChatID, llm.ChatMessage{

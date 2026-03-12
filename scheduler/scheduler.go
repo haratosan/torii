@@ -89,6 +89,8 @@ func (s *Scheduler) handleCron(ctx context.Context, task *store.Task) {
 	})
 	if err != nil {
 		s.logger.Error("scheduler: cron agent", "error", err, "task_id", task.ID)
+	} else if result.Silent {
+		s.logger.Info("cron task silent, skipping send", "task_id", task.ID)
 	} else {
 		if err := s.channel.Send(ctx, channel.Response{ChatID: task.ChatID, Text: result.Text}); err != nil {
 			s.logger.Error("scheduler: send cron result", "error", err, "task_id", task.ID)

@@ -66,6 +66,8 @@ func (g *Gateway) Run(ctx context.Context) error {
 		if err != nil {
 			g.logger.Error("agent error", "error", err)
 			resp.Text = "Sorry, something went wrong."
+		} else if result.Silent {
+			return
 		} else {
 			resp.Text = result.Text
 			resp.ImagePath = g.validateImagePath(result.ImagePath)
