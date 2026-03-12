@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -37,9 +38,20 @@ type sandboxArgs struct {
 	Command string `json:"command"`
 }
 
-// lookupContainerBin finds the container CLI binary, checking common
-// Homebrew paths in addition to $PATH (services often have a minimal PATH).
+// lookupContainerBin finds the container CLI binary.
+// On Linux it looks for docker; on macOS it looks for the Apple container CLI.
 func lookupContainerBin() (string, error) {
+	if runtime.GOOS == "linux" {
+		if p, err := exec.LookPath("docker"); err == nil {
+			return p, nil
+		}
+		if _, err := os.Stat("/usr/bin/docker"); err == nil {
+			return "/usr/bin/docker", nil
+		}
+		return "", fmt.Errorf("docker not found (install Docker: https://docs.docker.com/engine/install/)")
+	}
+
+	// macOS: use Apple container CLI
 	if p, err := exec.LookPath("container"); err == nil {
 		return p, nil
 	}

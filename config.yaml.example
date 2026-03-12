@@ -54,7 +54,8 @@ shell:
   timeout: "10s"
 
 sandbox:
-  enabled: false                 # requires: brew install container && container system start
+  enabled: false                 # macOS: brew install container && container system start
+                                 # Linux: requires Docker (https://docs.docker.com/engine/install/)
   image: "alpine:latest"
   shared_dir: "~/torii-sandbox"  # host dir mounted as /shared in container
   idle_timeout: "10m"            # stop container after this idle period
