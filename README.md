@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/torii_logo.png" alt="Torii Logo" width="400">
+</p>
+
 # Torii
 
 An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or OpenRouter). Torii supports tool-calling via external extensions, scheduled tasks, persistent memory, and per-user sessions.
