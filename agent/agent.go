@@ -15,6 +15,11 @@ import (
 	"github.com/haratosan/torii/store"
 )
 
+// MCPToolProvider provides MCP tool definitions for the agent.
+type MCPToolProvider interface {
+	Tools() []llm.ToolDef
+}
+
 type Agent struct {
 	provider      llm.Provider
 	executor      *extension.Executor
@@ -26,6 +31,7 @@ type Agent struct {
 	onboarding    *config.OnboardingConfig
 	providerName  string
 	modelName     string
+	mcpTools      MCPToolProvider
 	logger        *slog.Logger
 }
 
@@ -43,6 +49,11 @@ func New(provider llm.Provider, executor *extension.Executor, registry *extensio
 		modelName:     modelName,
 		logger:        logger,
 	}
+}
+
+// SetMCPToolProvider sets the MCP tool provider for tool discovery.
+func (a *Agent) SetMCPToolProvider(p MCPToolProvider) {
+	a.mcpTools = p
 }
 
 // AgentResponse contains the text reply and optional metadata from tool execution.
@@ -252,6 +263,22 @@ func (a *Agent) buildToolDefs() []llm.ToolDef {
 			Description: bt.Def.Description,
 			Parameters:  params,
 		})
+	}
+
+	// Append MCP tools (lowest priority — builtins > extensions > MCP)
+	if a.mcpTools != nil {
+		// Build set of existing tool names to avoid collisions
+		existing := make(map[string]bool, len(tools))
+		for _, t := range tools {
+			existing[t.Name] = true
+		}
+		for _, t := range a.mcpTools.Tools() {
+			if existing[t.Name] {
+				a.logger.Debug("mcp tool shadowed by existing tool", "name", t.Name)
+				continue
+			}
+			tools = append(tools, t)
+		}
 	}
 
 	return tools

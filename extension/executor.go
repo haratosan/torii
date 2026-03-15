@@ -13,11 +13,18 @@ import (
 	"time"
 )
 
+// MCPExecutor is the interface the executor uses to call MCP tools.
+type MCPExecutor interface {
+	HasTool(name string) bool
+	Execute(ctx context.Context, toolName string, input string) (*ExtResponse, error)
+}
+
 type Executor struct {
-	registry *Registry
-	timeout  time.Duration
-	envMap   map[string]string
-	logger   *slog.Logger
+	registry   *Registry
+	timeout    time.Duration
+	envMap     map[string]string
+	mcpManager MCPExecutor
+	logger     *slog.Logger
 }
 
 func NewExecutor(registry *Registry, timeout time.Duration, envMap map[string]string, logger *slog.Logger) *Executor {
@@ -27,6 +34,11 @@ func NewExecutor(registry *Registry, timeout time.Duration, envMap map[string]st
 		envMap:   envMap,
 		logger:   logger,
 	}
+}
+
+// SetMCPManager sets the MCP manager for tool execution fallback.
+func (e *Executor) SetMCPManager(m MCPExecutor) {
+	e.mcpManager = m
 }
 
 func (e *Executor) Execute(ctx context.Context, name string, input string, chatID string, userID string, images [][]byte) (*ExtResponse, error) {
@@ -44,6 +56,11 @@ func (e *Executor) Execute(ctx context.Context, name string, input string, chatI
 
 	ext, err := e.registry.Get(name)
 	if err != nil {
+		// Fallback to MCP
+		if e.mcpManager != nil && e.mcpManager.HasTool(name) {
+			e.logger.Info("executing mcp tool", "name", name, "input", input)
+			return e.mcpManager.Execute(ctx, name, input)
+		}
 		return nil, err
 	}
 

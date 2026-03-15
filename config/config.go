@@ -17,6 +17,19 @@ type Config struct {
 	Shell      ShellConfig      `yaml:"shell"`
 	Sandbox    SandboxConfig    `yaml:"sandbox"`
 	Onboarding OnboardingConfig `yaml:"onboarding"`
+	MCP        MCPConfig        `yaml:"mcp"`
+}
+
+type MCPConfig struct {
+	Servers []MCPServerConfig `yaml:"servers"`
+}
+
+type MCPServerConfig struct {
+	Name      string   `yaml:"name"`
+	Transport string   `yaml:"transport"` // "stdio" or "sse"
+	Command   string   `yaml:"command"`   // for stdio
+	Args      []string `yaml:"args"`      // for stdio
+	URL       string   `yaml:"url"`       // for sse
 }
 
 type GatewayConfig struct {

@@ -18,6 +18,7 @@ import (
 	"github.com/haratosan/torii/extension"
 	"github.com/haratosan/torii/gateway"
 	"github.com/haratosan/torii/llm"
+	"github.com/haratosan/torii/mcp"
 	"github.com/haratosan/torii/scheduler"
 	"github.com/haratosan/torii/session"
 	"github.com/haratosan/torii/store"
@@ -145,6 +146,26 @@ func main() {
 	}
 
 	ag := agent.New(provider, executor, registry, sessions, db, cfg.Gateway.SystemPrompt, cfg.Gateway.MaxToolRounds, &cfg.Onboarding, cfg.LLM.Provider, modelName, logger)
+
+	// Setup MCP servers
+	if len(cfg.MCP.Servers) > 0 {
+		mcpConfigs := make([]mcp.ServerConfig, len(cfg.MCP.Servers))
+		for i, s := range cfg.MCP.Servers {
+			mcpConfigs[i] = mcp.ServerConfig{
+				Name:      s.Name,
+				Transport: s.Transport,
+				Command:   s.Command,
+				Args:      s.Args,
+				URL:       s.URL,
+			}
+		}
+		mcpManager := mcp.NewManager(logger)
+		mcpManager.Start(context.Background(), mcpConfigs)
+		executor.SetMCPManager(mcpManager)
+		ag.SetMCPToolProvider(mcpManager)
+		defer mcpManager.Shutdown()
+		logger.Info("mcp servers configured", "count", len(cfg.MCP.Servers))
+	}
 
 	// Setup Telegram channel
 	if cfg.Telegram.Token == "" {
