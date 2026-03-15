@@ -61,6 +61,7 @@ type AgentResponse struct {
 	Text      string
 	ImagePath string
 	Silent    bool
+	Buttons   [][]channel.Button
 }
 
 func (a *Agent) HandleCommand(msg channel.Message) (string, bool) {
@@ -101,6 +102,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 	userImages := msg.Images
 
 	var lastImagePath string
+	var lastButtons [][]channel.Button
 	var silent bool
 
 	// Agent loop: LLM may request tool calls multiple times
@@ -121,7 +123,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 				Role:    llm.RoleAssistant,
 				Content: resp.Content,
 			})
-			return &AgentResponse{Text: resp.Content, ImagePath: lastImagePath, Silent: silent}, nil
+			return &AgentResponse{Text: resp.Content, ImagePath: lastImagePath, Silent: silent, Buttons: lastButtons}, nil
 		}
 
 		// Store assistant message with tool calls
@@ -165,10 +167,13 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 				output = fmt.Sprintf("Error: %s", result.Error)
 			}
 
-			// Check for image_path in tool result data
+			// Check for image_path and buttons in tool result data
 			if result.Data != nil {
 				if imgPath, ok := result.Data["image_path"].(string); ok && imgPath != "" {
 					lastImagePath = imgPath
+				}
+				if btns, ok := result.Data["buttons"]; ok {
+					lastButtons = parseButtons(btns)
 				}
 			}
 
@@ -180,7 +185,55 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 		}
 	}
 
-	return &AgentResponse{Text: "I've reached the maximum number of tool calls. Here's what I found so far.", ImagePath: lastImagePath}, nil
+	return &AgentResponse{Text: "I've reached the maximum number of tool calls. Here's what I found so far.", ImagePath: lastImagePath, Buttons: lastButtons}, nil
+}
+
+// parseButtons converts the generic button data from ExtResponse.Data into typed Button slices.
+func parseButtons(data any) [][]channel.Button {
+	rows, ok := data.([][]map[string]string)
+	if ok {
+		var result [][]channel.Button
+		for _, row := range rows {
+			var btnRow []channel.Button
+			for _, btn := range row {
+				btnRow = append(btnRow, channel.Button{
+					Text:  btn["text"],
+					Value: btn["value"],
+				})
+			}
+			result = append(result, btnRow)
+		}
+		return result
+	}
+
+	// Handle interface{} slices (from JSON unmarshaling)
+	rowsAny, ok := data.([]any)
+	if !ok {
+		return nil
+	}
+	var result [][]channel.Button
+	for _, rowAny := range rowsAny {
+		rowSlice, ok := rowAny.([]any)
+		if !ok {
+			continue
+		}
+		var btnRow []channel.Button
+		for _, btnAny := range rowSlice {
+			btnMap, ok := btnAny.(map[string]string)
+			if ok {
+				btnRow = append(btnRow, channel.Button{Text: btnMap["text"], Value: btnMap["value"]})
+				continue
+			}
+			btnMapAny, ok := btnAny.(map[string]any)
+			if ok {
+				text, _ := btnMapAny["text"].(string)
+				value, _ := btnMapAny["value"].(string)
+				btnRow = append(btnRow, channel.Button{Text: text, Value: value})
+			}
+		}
+		result = append(result, btnRow)
+	}
+	return result
 }
 
 func (a *Agent) buildMessages(chatID string, userID string) []llm.ChatMessage {

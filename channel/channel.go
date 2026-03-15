@@ -13,10 +13,16 @@ type Message struct {
 	Images [][]byte
 }
 
+type Button struct {
+	Text  string
+	Value string
+}
+
 type Response struct {
 	ChatID    string
 	Text      string
 	ImagePath string
+	Buttons   [][]Button
 }
 
 type MessageHandler func(Message)

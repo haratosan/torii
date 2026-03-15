@@ -123,6 +123,7 @@ func main() {
 	registry.RegisterBuiltin(builtin.NewRemindTool(db))
 	registry.RegisterBuiltin(builtin.NewCronTool(db))
 	registry.RegisterBuiltin(builtin.NewNoReplyTool())
+	registry.RegisterBuiltin(builtin.NewButtonsTool())
 
 	if cfg.Sandbox.Enabled {
 		sandboxTool, sandboxMgr := builtin.NewSandboxTool(&cfg.Sandbox, logger)

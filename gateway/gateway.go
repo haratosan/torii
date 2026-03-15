@@ -71,6 +71,7 @@ func (g *Gateway) Run(ctx context.Context) error {
 		} else {
 			resp.Text = result.Text
 			resp.ImagePath = g.validateImagePath(result.ImagePath)
+			resp.Buttons = result.Buttons
 		}
 
 		if resp.Text == "" && resp.ImagePath == "" {

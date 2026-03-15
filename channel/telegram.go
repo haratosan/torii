@@ -67,17 +67,41 @@ func (t *Telegram) Send(ctx context.Context, resp Response) error {
 		text = text[:4093] + "..."
 	}
 
-	_, err = t.bot.SendMessage(ctx, &bot.SendMessageParams{
+	params := &bot.SendMessageParams{
 		ChatID:    chatID,
 		Text:      markdownToHTML(text),
 		ParseMode: models.ParseModeHTML,
-	})
+	}
+
+	// Build inline keyboard if buttons provided
+	if len(resp.Buttons) > 0 {
+		var keyboard [][]models.InlineKeyboardButton
+		for _, row := range resp.Buttons {
+			var kbRow []models.InlineKeyboardButton
+			for _, btn := range row {
+				callbackData := btn.Value
+				// Telegram callback_data limit is 64 bytes
+				if len(callbackData) > 64 {
+					callbackData = callbackData[:64]
+				}
+				kbRow = append(kbRow, models.InlineKeyboardButton{
+					Text:         btn.Text,
+					CallbackData: callbackData,
+				})
+			}
+			keyboard = append(keyboard, kbRow)
+		}
+		params.ReplyMarkup = &models.InlineKeyboardMarkup{
+			InlineKeyboard: keyboard,
+		}
+	}
+
+	_, err = t.bot.SendMessage(ctx, params)
 	if err != nil {
 		t.logger.Debug("html send failed, retrying plain", "error", err)
-		_, err = t.bot.SendMessage(ctx, &bot.SendMessageParams{
-			ChatID: chatID,
-			Text:   text,
-		})
+		params.ParseMode = ""
+		params.Text = text
+		_, err = t.bot.SendMessage(ctx, params)
 	}
 	return err
 }
@@ -125,6 +149,12 @@ func (t *Telegram) SendTyping(ctx context.Context, chatID string) error {
 }
 
 func (t *Telegram) handleUpdate(ctx context.Context, b *bot.Bot, update *models.Update) {
+	// Handle inline keyboard callback queries
+	if update.CallbackQuery != nil {
+		t.handleCallbackQuery(ctx, b, update.CallbackQuery)
+		return
+	}
+
 	if update.Message == nil {
 		return
 	}
@@ -190,6 +220,46 @@ func (t *Telegram) handleUpdate(ctx context.Context, b *bot.Bot, update *models.
 			UserID: strconv.FormatInt(userID, 10),
 			Text:   text,
 			Images: images,
+		})
+	}
+}
+
+func (t *Telegram) handleCallbackQuery(ctx context.Context, b *bot.Bot, cq *models.CallbackQuery) {
+	// Answer the callback to remove the loading indicator
+	b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+		CallbackQueryID: cq.ID,
+	})
+
+	userID := cq.From.ID
+	chatID := cq.Message.Message.Chat.ID
+
+	// Check allowed users
+	if len(t.allowedUsers) > 0 {
+		allowed := false
+		for _, id := range t.allowedUsers {
+			if id == userID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			t.logger.Warn("unauthorized callback user", "user_id", userID)
+			return
+		}
+	}
+
+	text := cq.Data
+	if text == "" {
+		return
+	}
+
+	t.logger.Info("telegram callback", "chat_id", chatID, "user_id", userID, "data", text)
+
+	if t.handler != nil {
+		t.handler(Message{
+			ChatID: strconv.FormatInt(chatID, 10),
+			UserID: strconv.FormatInt(userID, 10),
+			Text:   text,
 		})
 	}
 }
