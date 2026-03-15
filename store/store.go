@@ -79,6 +79,25 @@ func (s *Store) migrate() error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE INDEX IF NOT EXISTS idx_session_messages_chat_id ON session_messages(chat_id);
+
+		CREATE TABLE IF NOT EXISTS kb_documents (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			chat_id TEXT NOT NULL,
+			title TEXT NOT NULL,
+			content TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_kb_documents_chat_id ON kb_documents(chat_id);
+
+		CREATE TABLE IF NOT EXISTS kb_chunks (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			document_id INTEGER NOT NULL,
+			chat_id TEXT NOT NULL,
+			content TEXT NOT NULL,
+			embedding BLOB,
+			FOREIGN KEY (document_id) REFERENCES kb_documents(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_kb_chunks_chat_id ON kb_chunks(chat_id);
 	`)
 	return err
 }
@@ -285,6 +304,103 @@ func (s *Store) TrimMessages(chatID string, keep int) error {
 		chatID, chatID, keep,
 	)
 	return err
+}
+
+// --- Knowledge Base ---
+
+type KBDocument struct {
+	ID        int64
+	ChatID    string
+	Title     string
+	Content   string
+	CreatedAt string
+}
+
+type KBChunk struct {
+	ID         int64
+	DocumentID int64
+	ChatID     string
+	Content    string
+	Embedding  []byte
+}
+
+func (s *Store) CreateKBDocument(chatID string, title string, content string) (int64, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO kb_documents (chat_id, title, content) VALUES (?, ?, ?)`,
+		chatID, title, content,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (s *Store) ListKBDocuments(chatID string) ([]KBDocument, error) {
+	rows, err := s.db.Query(
+		`SELECT id, chat_id, title, content, created_at FROM kb_documents WHERE chat_id = ? ORDER BY id`,
+		chatID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var docs []KBDocument
+	for rows.Next() {
+		var d KBDocument
+		if err := rows.Scan(&d.ID, &d.ChatID, &d.Title, &d.Content, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		docs = append(docs, d)
+	}
+	return docs, rows.Err()
+}
+
+func (s *Store) GetKBDocumentTitle(docID int64) (string, error) {
+	var title string
+	err := s.db.QueryRow(`SELECT title FROM kb_documents WHERE id = ?`, docID).Scan(&title)
+	if err != nil {
+		return "", err
+	}
+	return title, nil
+}
+
+func (s *Store) DeleteKBDocument(chatID string, docID int64) error {
+	// Delete chunks first
+	if _, err := s.db.Exec(`DELETE FROM kb_chunks WHERE document_id = ? AND chat_id = ?`, docID, chatID); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM kb_documents WHERE id = ? AND chat_id = ?`, docID, chatID)
+	return err
+}
+
+func (s *Store) CreateKBChunk(docID int64, chatID string, content string, embedding []byte) error {
+	_, err := s.db.Exec(
+		`INSERT INTO kb_chunks (document_id, chat_id, content, embedding) VALUES (?, ?, ?, ?)`,
+		docID, chatID, content, embedding,
+	)
+	return err
+}
+
+func (s *Store) ListKBChunks(chatID string) ([]KBChunk, error) {
+	rows, err := s.db.Query(
+		`SELECT id, document_id, chat_id, content, embedding FROM kb_chunks WHERE chat_id = ?`,
+		chatID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chunks []KBChunk
+	for rows.Next() {
+		var c KBChunk
+		if err := rows.Scan(&c.ID, &c.DocumentID, &c.ChatID, &c.Content, &c.Embedding); err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, c)
+	}
+	return chunks, rows.Err()
 }
 
 func boolToInt(b bool) int {

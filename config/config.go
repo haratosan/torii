@@ -18,6 +18,7 @@ type Config struct {
 	Sandbox    SandboxConfig    `yaml:"sandbox"`
 	Onboarding OnboardingConfig `yaml:"onboarding"`
 	MCP        MCPConfig        `yaml:"mcp"`
+	Knowledge  KnowledgeConfig  `yaml:"knowledge"`
 }
 
 type MCPConfig struct {
@@ -129,6 +130,14 @@ type OnboardingConfig struct {
 	Questions []string `yaml:"questions"`
 }
 
+type KnowledgeConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	EmbeddingModel string `yaml:"embedding_model"`
+	ChunkSize      int    `yaml:"chunk_size"`
+	ChunkOverlap   int    `yaml:"chunk_overlap"`
+	TopK           int    `yaml:"top_k"`
+}
+
 func (c *ExtensionsConfig) TimeoutDuration() time.Duration {
 	d, err := time.ParseDuration(c.Timeout)
 	if err != nil {
@@ -193,6 +202,13 @@ Scheduling:
 		},
 		Onboarding: OnboardingConfig{
 			Enabled: false,
+		},
+		Knowledge: KnowledgeConfig{
+			Enabled:        false,
+			EmbeddingModel: "nomic-embed-text",
+			ChunkSize:      500,
+			ChunkOverlap:   50,
+			TopK:           5,
 		},
 	}
 

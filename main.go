@@ -17,6 +17,7 @@ import (
 	"github.com/haratosan/torii/config"
 	"github.com/haratosan/torii/extension"
 	"github.com/haratosan/torii/gateway"
+	"github.com/haratosan/torii/knowledge"
 	"github.com/haratosan/torii/llm"
 	"github.com/haratosan/torii/mcp"
 	"github.com/haratosan/torii/scheduler"
@@ -124,6 +125,17 @@ func main() {
 	registry.RegisterBuiltin(builtin.NewCronTool(db))
 	registry.RegisterBuiltin(builtin.NewNoReplyTool())
 	registry.RegisterBuiltin(builtin.NewButtonsTool())
+
+	if cfg.Knowledge.Enabled {
+		ollamaHost := cfg.LLM.Ollama.Host
+		if ollamaHost == "" {
+			ollamaHost = "http://localhost:11434"
+		}
+		embedder := knowledge.NewOllamaEmbedder(ollamaHost, cfg.Knowledge.EmbeddingModel)
+		ks := knowledge.NewKnowledgeStore(db, embedder, cfg.Knowledge.ChunkSize, cfg.Knowledge.ChunkOverlap)
+		registry.RegisterBuiltin(builtin.NewKnowledgeTool(ks))
+		logger.Info("knowledge base enabled", "model", cfg.Knowledge.EmbeddingModel)
+	}
 
 	if cfg.Sandbox.Enabled {
 		sandboxTool, sandboxMgr := builtin.NewSandboxTool(&cfg.Sandbox, logger)
