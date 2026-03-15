@@ -4,7 +4,7 @@
 
 # Torii
 
-An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or OpenRouter). Torii supports tool-calling via external extensions, scheduled tasks, persistent memory, and per-user sessions.
+An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or OpenRouter). Torii supports tool-calling via built-in tools, external extensions, and MCP servers. Features include persistent sessions, scheduled tasks, user memory, inline keyboards, and a per-chat knowledge base with RAG.
 
 ## Features
 
@@ -25,6 +25,7 @@ An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
 - Ollama running locally, or an OpenRouter API key
 - (Optional) Sandbox: Apple Containers on macOS (`brew install container` + `container system start`) or Docker on Linux
+- (Optional) Knowledge base: Ollama with `nomic-embed-text` model (`ollama pull nomic-embed-text`)
 
 ## Setup
 
@@ -97,6 +98,62 @@ make uninstall
 ```
 
 This stops the service, removes the binary and extensions, but preserves your config at `~/.config/torii/`.
+
+## Session Persistence
+
+Conversation history is automatically persisted to SQLite and restored on restart. No configuration needed — sessions survive bot restarts transparently.
+
+- Messages (including tool calls) are stored in the `session_messages` table
+- On first message after restart, history is loaded from DB into memory
+- `/new` clears both in-memory and persisted history
+- History is trimmed to `session.max_history` in both layers
+
+## MCP Client
+
+Torii can connect to [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) servers to extend its tool capabilities. Both stdio (subprocess) and SSE (HTTP) transports are supported.
+
+```yaml
+mcp:
+  servers:
+    - name: "filesystem"
+      transport: "stdio"
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+    - name: "web-search"
+      transport: "sse"
+      url: "http://localhost:3001/sse"
+```
+
+MCP tools are discovered automatically at startup and integrated into the agent's tool system. Tool priority: builtins > extensions > MCP (name collisions are resolved by this order).
+
+## Inline Keyboards
+
+The LLM can present interactive buttons to users via the `send-buttons` built-in tool. When a user clicks a button, the callback data is routed back through the agent as a new message.
+
+This happens automatically when the LLM decides to present choices — no configuration required.
+
+## Knowledge Base / RAG
+
+Per-chat semantic document search using vector embeddings. Documents are chunked, embedded via Ollama, and stored in SQLite for cosine similarity search.
+
+**Requirements:** Ollama with an embedding model pulled (`ollama pull nomic-embed-text`).
+
+```yaml
+knowledge:
+  enabled: true
+  embedding_model: "nomic-embed-text"
+  chunk_size: 500
+  chunk_overlap: 50
+  top_k: 5
+```
+
+The LLM uses the `knowledge` tool automatically with these actions:
+- **add** -- store a document (title + content), chunked and embedded
+- **search** -- semantic search across stored documents
+- **list** -- show all documents in the chat's knowledge base
+- **delete** -- remove a document by ID
+
+Knowledge bases are scoped per chat (groups share knowledge, private chats are separate).
 
 ## Bot Commands
 
