@@ -69,6 +69,16 @@ func (s *Store) migrate() error {
 			value TEXT NOT NULL,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
+		CREATE TABLE IF NOT EXISTS session_messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			chat_id TEXT NOT NULL,
+			role TEXT NOT NULL,
+			content TEXT DEFAULT '',
+			tool_calls TEXT DEFAULT '',
+			tool_call_id TEXT DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_session_messages_chat_id ON session_messages(chat_id);
 	`)
 	return err
 }
@@ -214,6 +224,67 @@ func (s *Store) GetAllBotProfile() (map[string]string, error) {
 		result[k] = v
 	}
 	return result, rows.Err()
+}
+
+// --- Session Messages ---
+
+type SessionMessage struct {
+	ID         int64
+	ChatID     string
+	Role       string
+	Content    string
+	ToolCalls  string
+	ToolCallID string
+}
+
+func (s *Store) SaveMessage(chatID string, role string, content string, toolCalls string, toolCallID string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO session_messages (chat_id, role, content, tool_calls, tool_call_id) VALUES (?, ?, ?, ?, ?)`,
+		chatID, role, content, toolCalls, toolCallID,
+	)
+	return err
+}
+
+func (s *Store) LoadMessages(chatID string, limit int) ([]SessionMessage, error) {
+	rows, err := s.db.Query(
+		`SELECT id, chat_id, role, content, tool_calls, tool_call_id FROM session_messages WHERE chat_id = ? ORDER BY id DESC LIMIT ?`,
+		chatID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []SessionMessage
+	for rows.Next() {
+		var m SessionMessage
+		if err := rows.Scan(&m.ID, &m.ChatID, &m.Role, &m.Content, &m.ToolCalls, &m.ToolCallID); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Reverse to chronological order
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
+}
+
+func (s *Store) DeleteMessages(chatID string) error {
+	_, err := s.db.Exec(`DELETE FROM session_messages WHERE chat_id = ?`, chatID)
+	return err
+}
+
+func (s *Store) TrimMessages(chatID string, keep int) error {
+	_, err := s.db.Exec(
+		`DELETE FROM session_messages WHERE chat_id = ? AND id NOT IN (SELECT id FROM session_messages WHERE chat_id = ? ORDER BY id DESC LIMIT ?)`,
+		chatID, chatID, keep,
+	)
+	return err
 }
 
 func boolToInt(b bool) int {

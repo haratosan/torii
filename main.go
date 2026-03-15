@@ -131,8 +131,8 @@ func main() {
 
 	executor := extension.NewExecutor(registry, cfg.Extensions.TimeoutDuration(), cfg.Extensions.Env, logger)
 
-	// Setup session store
-	sessions := session.NewStore(cfg.Session.MaxHistory)
+	// Setup session store (DB-backed for persistence across restarts)
+	sessions := session.NewStore(cfg.Session.MaxHistory, db, logger)
 
 	// Setup agent
 	// Determine model name based on provider
