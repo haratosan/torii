@@ -66,3 +66,20 @@ onboarding:
     - "Wie soll ich dich nennen?"
     - "Welche Sprache bevorzugst du?"
     - "Gibt es etwas, das ich über dich wissen sollte?"
+
+mcp:
+  servers: []
+  # - name: "filesystem"
+  #   transport: "stdio"
+  #   command: "npx"
+  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
+  # - name: "web-search"
+  #   transport: "sse"
+  #   url: "http://localhost:3001/sse"
+
+knowledge:
+  enabled: false
+  embedding_model: "nomic-embed-text"   # must be pulled in Ollama
+  chunk_size: 500                       # tokens per chunk
+  chunk_overlap: 50                     # overlap between chunks
+  top_k: 5                             # default search results

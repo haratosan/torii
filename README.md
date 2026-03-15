@@ -11,9 +11,11 @@ An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or
 - **Telegram integration** -- chat with your AI assistant via Telegram
 - **Multiple LLM backends** -- Ollama (local) or OpenRouter (cloud)
 - **Extension system** -- add custom tools as standalone executables
-- **Built-in tools** -- memory, bot profile, shell access, sandbox (containerized), reminders, cron jobs, no-reply (silent response suppression)
+- **Built-in tools** -- memory, bot profile, shell access, sandbox (containerized), reminders, cron jobs, inline keyboards, knowledge base, no-reply (silent response suppression)
+- **MCP client** -- connect to any MCP server (stdio or SSE) to extend tool capabilities
 - **Scheduler** -- run reminders and cron tasks in the background
-- **Session management** -- per-user conversation history
+- **Session persistence** -- per-user conversation history, survives restarts
+- **Knowledge base / RAG** -- per-chat semantic document search using Ollama embeddings
 - **Bot commands** -- `/new`, `/status`, `/system`, `/help`
 - **Onboarding** -- configurable welcome questions for new users
 
@@ -142,15 +144,17 @@ This creates a `release/` directory with the binary, config example, and all ext
 main.go          -- entrypoint
 agent/           -- agentic tool-calling loop
 cmd/             -- CLI subcommands (service management)
-builtin/         -- built-in tools (memory, shell, remind, cron, ...)
+builtin/         -- built-in tools (memory, shell, remind, cron, buttons, knowledge, ...)
 channel/         -- messaging channels (Telegram)
 config/          -- YAML config loading
 extension/       -- extension registry and executor
 extensions/      -- example extension binaries
 gateway/         -- message routing between channel and agent
+knowledge/       -- RAG: chunking, embedding, vector search
 llm/             -- LLM provider abstraction (Ollama, OpenRouter)
+mcp/             -- MCP client (stdio/SSE) and server manager
 scheduler/       -- background task scheduler
-session/         -- per-user session/history management
+session/         -- per-user session/history management (DB-backed)
 store/           -- SQLite persistence layer
 ```
 
