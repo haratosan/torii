@@ -15,7 +15,7 @@ An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or
 - **MCP client** -- connect to any MCP server (stdio or SSE) to extend tool capabilities
 - **Scheduler** -- run reminders and cron tasks in the background
 - **Session persistence** -- per-user conversation history, survives restarts
-- **Knowledge base / RAG** -- per-chat semantic document search using Ollama embeddings
+- **Knowledge base / RAG** -- per-chat semantic document search using Ollama embeddings, with automatic PDF import via vision OCR
 - **Bot commands** -- `/new`, `/status`, `/system`, `/help`
 - **Onboarding** -- configurable welcome questions for new users
 
@@ -26,6 +26,7 @@ An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or
 - Ollama running locally, or an OpenRouter API key
 - (Optional) Sandbox: Apple Containers on macOS (`brew install container` + `container system start`) or Docker on Linux
 - (Optional) Knowledge base: Ollama with `nomic-embed-text` model (`ollama pull nomic-embed-text`)
+- (Optional) PDF import: `poppler` for PDF-to-image conversion (`brew install poppler` on macOS, `apt install poppler-utils` on Linux) and a vision model in Ollama (`ollama pull llava`)
 
 ## Setup
 
@@ -142,6 +143,8 @@ Per-chat semantic document search using vector embeddings. Documents are chunked
 knowledge:
   enabled: true
   embedding_model: "nomic-embed-text"
+  vision_model: "llava"        # for PDF text extraction
+  max_pdf_pages: 20            # max pages per PDF
   chunk_size: 500
   chunk_overlap: 50
   top_k: 5
@@ -152,6 +155,8 @@ The LLM uses the `knowledge` tool automatically with these actions:
 - **search** -- semantic search across stored documents
 - **list** -- show all documents in the chat's knowledge base
 - **delete** -- remove a document by ID
+
+**PDF import:** Send a PDF file to the bot via Telegram and it will automatically convert pages to images (via `pdftoppm`), extract text using a vision model (e.g. `llava`), and store the content in the knowledge base. Requires `poppler` installed and a vision model pulled in Ollama.
 
 Knowledge bases are scoped per chat (groups share knowledge, private chats are separate).
 
@@ -208,6 +213,7 @@ extension/       -- extension registry and executor
 extensions/      -- example extension binaries
 gateway/         -- message routing between channel and agent
 knowledge/       -- RAG: chunking, embedding, vector search
+pdf/             -- PDF-to-text via pdftoppm + vision OCR
 llm/             -- LLM provider abstraction (Ollama, OpenRouter)
 mcp/             -- MCP client (stdio/SSE) and server manager
 scheduler/       -- background task scheduler

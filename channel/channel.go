@@ -6,11 +6,18 @@ import (
 
 type TranscribeFn func(ctx context.Context, filePath string) (string, error)
 
+type Document struct {
+	FileName string
+	MimeType string
+	Data     []byte
+}
+
 type Message struct {
-	ChatID string
-	UserID string
-	Text   string
-	Images [][]byte
+	ChatID   string
+	UserID   string
+	Text     string
+	Images   [][]byte
+	Document *Document
 }
 
 type Button struct {

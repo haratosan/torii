@@ -80,6 +80,8 @@ mcp:
 knowledge:
   enabled: false
   embedding_model: "nomic-embed-text"   # must be pulled in Ollama
+  vision_model: "llava"                 # for PDF text extraction via vision OCR
+  max_pdf_pages: 20                     # max pages to process per PDF
   chunk_size: 500                       # tokens per chunk
   chunk_overlap: 50                     # overlap between chunks
   top_k: 5                             # default search results

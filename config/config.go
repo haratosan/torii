@@ -133,6 +133,8 @@ type OnboardingConfig struct {
 type KnowledgeConfig struct {
 	Enabled        bool   `yaml:"enabled"`
 	EmbeddingModel string `yaml:"embedding_model"`
+	VisionModel    string `yaml:"vision_model"`
+	MaxPDFPages    int    `yaml:"max_pdf_pages"`
 	ChunkSize      int    `yaml:"chunk_size"`
 	ChunkOverlap   int    `yaml:"chunk_overlap"`
 	TopK           int    `yaml:"top_k"`
@@ -206,6 +208,8 @@ Scheduling:
 		Knowledge: KnowledgeConfig{
 			Enabled:        false,
 			EmbeddingModel: "nomic-embed-text",
+			VisionModel:    "llava",
+			MaxPDFPages:    20,
 			ChunkSize:      500,
 			ChunkOverlap:   50,
 			TopK:           5,

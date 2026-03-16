@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/haratosan/torii/agent"
@@ -20,6 +21,7 @@ import (
 	"github.com/haratosan/torii/knowledge"
 	"github.com/haratosan/torii/llm"
 	"github.com/haratosan/torii/mcp"
+	"github.com/haratosan/torii/pdf"
 	"github.com/haratosan/torii/scheduler"
 	"github.com/haratosan/torii/session"
 	"github.com/haratosan/torii/store"
@@ -126,13 +128,14 @@ func main() {
 	registry.RegisterBuiltin(builtin.NewNoReplyTool())
 	registry.RegisterBuiltin(builtin.NewButtonsTool())
 
+	var ks *knowledge.KnowledgeStore
 	if cfg.Knowledge.Enabled {
 		ollamaHost := cfg.LLM.Ollama.Host
 		if ollamaHost == "" {
 			ollamaHost = "http://localhost:11434"
 		}
 		embedder := knowledge.NewOllamaEmbedder(ollamaHost, cfg.Knowledge.EmbeddingModel)
-		ks := knowledge.NewKnowledgeStore(db, embedder, cfg.Knowledge.ChunkSize, cfg.Knowledge.ChunkOverlap)
+		ks = knowledge.NewKnowledgeStore(db, embedder, cfg.Knowledge.ChunkSize, cfg.Knowledge.ChunkOverlap)
 		registry.RegisterBuiltin(builtin.NewKnowledgeTool(ks))
 		logger.Info("knowledge base enabled", "model", cfg.Knowledge.EmbeddingModel)
 	}
@@ -204,8 +207,40 @@ func main() {
 
 	ch := channel.NewTelegram(cfg.Telegram.Token, cfg.Telegram.AllowedUsers, transcriber, logger)
 
+	// Setup PDF import function
+	var pdfImportFn gateway.PDFImportFn
+	if ks != nil && cfg.Knowledge.VisionModel != "" {
+		ollamaHost := cfg.LLM.Ollama.Host
+		if ollamaHost == "" {
+			ollamaHost = "http://localhost:11434"
+		}
+		visionModel := cfg.Knowledge.VisionModel
+		maxPages := cfg.Knowledge.MaxPDFPages
+		pdfImportFn = func(ctx context.Context, chatID, fileName string, data []byte) (string, error) {
+			pages, err := pdf.ToImages(data, maxPages)
+			if err != nil {
+				return "", fmt.Errorf("convert pdf: %w", err)
+			}
+
+			text, err := pdf.ExtractText(ctx, ollamaHost, visionModel, pages)
+			if err != nil {
+				return "", fmt.Errorf("extract text: %w", err)
+			}
+
+			title := strings.TrimSuffix(fileName, ".pdf")
+			title = strings.TrimSuffix(title, ".PDF")
+			docID, err := ks.Add(ctx, chatID, title, text)
+			if err != nil {
+				return "", fmt.Errorf("store document: %w", err)
+			}
+
+			return fmt.Sprintf("PDF '%s' imported (ID: %d, %d pages, %d chars).", title, docID, len(pages), len(text)), nil
+		}
+		logger.Info("pdf import enabled", "vision_model", visionModel, "max_pages", maxPages)
+	}
+
 	// Setup gateway
-	gw := gateway.New(ch, ag, cfg.Gateway.AgentTimeoutDuration(), cfg.Extensions.Dirs, logger)
+	gw := gateway.New(ch, ag, cfg.Gateway.AgentTimeoutDuration(), cfg.Extensions.Dirs, pdfImportFn, logger)
 
 	// Run with graceful shutdown
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

@@ -190,7 +190,25 @@ func (t *Telegram) handleUpdate(ctx context.Context, b *bot.Bot, update *models.
 		}
 	}
 
-	if text == "" && len(images) == 0 {
+	// Handle PDF documents
+	var doc *Document
+	if update.Message.Document != nil && update.Message.Document.MimeType == "application/pdf" {
+		if text == "" {
+			text = update.Message.Caption
+		}
+		docData, err := t.downloadFile(ctx, b, update.Message.Document.FileID)
+		if err != nil {
+			t.logger.Error("document download failed", "error", err)
+		} else {
+			doc = &Document{
+				FileName: update.Message.Document.FileName,
+				MimeType: update.Message.Document.MimeType,
+				Data:     docData,
+			}
+		}
+	}
+
+	if text == "" && len(images) == 0 && doc == nil {
 		return
 	}
 
@@ -216,10 +234,11 @@ func (t *Telegram) handleUpdate(ctx context.Context, b *bot.Bot, update *models.
 
 	if t.handler != nil {
 		t.handler(Message{
-			ChatID: strconv.FormatInt(chatID, 10),
-			UserID: strconv.FormatInt(userID, 10),
-			Text:   text,
-			Images: images,
+			ChatID:   strconv.FormatInt(chatID, 10),
+			UserID:   strconv.FormatInt(userID, 10),
+			Text:     text,
+			Images:   images,
+			Document: doc,
 		})
 	}
 }

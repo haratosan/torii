@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -11,20 +12,24 @@ import (
 	"github.com/haratosan/torii/channel"
 )
 
+type PDFImportFn func(ctx context.Context, chatID, fileName string, data []byte) (string, error)
+
 type Gateway struct {
 	agent         *agent.Agent
 	channel       channel.Channel
 	agentTimeout  time.Duration
 	extensionDirs []string
+	pdfImport     PDFImportFn
 	logger        *slog.Logger
 }
 
-func New(ch channel.Channel, ag *agent.Agent, agentTimeout time.Duration, extensionDirs []string, logger *slog.Logger) *Gateway {
+func New(ch channel.Channel, ag *agent.Agent, agentTimeout time.Duration, extensionDirs []string, pdfImport PDFImportFn, logger *slog.Logger) *Gateway {
 	return &Gateway{
 		agent:         ag,
 		channel:       ch,
 		agentTimeout:  agentTimeout,
 		extensionDirs: extensionDirs,
+		pdfImport:     pdfImport,
 		logger:        logger,
 	}
 }
@@ -34,6 +39,27 @@ func (g *Gateway) Run(ctx context.Context) error {
 
 	return g.channel.Start(ctx, func(msg channel.Message) {
 		g.logger.Info("message received", "chat_id", msg.ChatID, "user_id", msg.UserID)
+
+		// Handle PDF document import
+		if msg.Document != nil && msg.Document.MimeType == "application/pdf" && g.pdfImport != nil {
+			typingCtx, stopTyping := context.WithCancel(ctx)
+			go g.keepTyping(typingCtx, msg.ChatID)
+
+			result, err := g.pdfImport(ctx, msg.ChatID, msg.Document.FileName, msg.Document.Data)
+			stopTyping()
+
+			resp := channel.Response{ChatID: msg.ChatID}
+			if err != nil {
+				g.logger.Error("pdf import error", "error", err)
+				resp.Text = fmt.Sprintf("PDF import failed: %v", err)
+			} else {
+				resp.Text = result
+			}
+			if err := g.channel.Send(ctx, resp); err != nil {
+				g.logger.Error("send error", "error", err)
+			}
+			return
+		}
 
 		// Handle bot commands
 		if resp, ok := g.agent.HandleCommand(msg); ok {
