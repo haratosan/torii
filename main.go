@@ -247,7 +247,7 @@ func main() {
 	defer cancel()
 
 	// Start scheduler in background
-	sched := scheduler.New(db, ch, ag, cfg.Scheduler.IntervalDuration(), logger)
+	sched := scheduler.New(db, ch, ag, sessions, cfg.Scheduler.IntervalDuration(), logger)
 	go sched.Run(ctx)
 
 	if err := gw.Run(ctx); err != nil {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/haratosan/torii/agent"
 	"github.com/haratosan/torii/channel"
+	"github.com/haratosan/torii/session"
 	"github.com/haratosan/torii/store"
 	"github.com/robfig/cron/v3"
 )
@@ -16,15 +17,17 @@ type Scheduler struct {
 	store    *store.Store
 	channel  channel.Channel
 	agent    *agent.Agent
+	sessions *session.Store
 	interval time.Duration
 	logger   *slog.Logger
 }
 
-func New(db *store.Store, ch channel.Channel, ag *agent.Agent, interval time.Duration, logger *slog.Logger) *Scheduler {
+func New(db *store.Store, ch channel.Channel, ag *agent.Agent, sess *session.Store, interval time.Duration, logger *slog.Logger) *Scheduler {
 	return &Scheduler{
 		store:    db,
 		channel:  ch,
 		agent:    ag,
+		sessions: sess,
 		interval: interval,
 		logger:   logger,
 	}
@@ -78,15 +81,20 @@ func (s *Scheduler) handleRemind(ctx context.Context, task *store.Task) {
 }
 
 func (s *Scheduler) handleCron(ctx context.Context, task *store.Task) {
-	// Process through agent
+	// Process through agent using a temporary session to avoid filling the chat history
 	taskCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
+	tmpChatID := fmt.Sprintf("cron:%d", task.ID)
+
 	result, err := s.agent.HandleMessage(taskCtx, channel.Message{
-		ChatID: task.ChatID,
+		ChatID: tmpChatID,
 		UserID: task.UserID,
 		Text:   task.Description,
 	})
+
+	// Clean up temporary session
+	s.sessions.Clear(tmpChatID)
 	if err != nil {
 		s.logger.Error("scheduler: cron agent", "error", err, "task_id", task.ID)
 	} else if result.Silent {
