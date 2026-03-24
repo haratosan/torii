@@ -232,13 +232,22 @@ func (t *Telegram) handleUpdate(ctx context.Context, b *bot.Bot, update *models.
 
 	t.logger.Info("telegram message", "chat_id", chatID, "user_id", userID, "text", text)
 
+	var replyText string
+	if update.Message.ReplyToMessage != nil {
+		replyText = update.Message.ReplyToMessage.Text
+		if replyText == "" && update.Message.ReplyToMessage.Caption != "" {
+			replyText = update.Message.ReplyToMessage.Caption
+		}
+	}
+
 	if t.handler != nil {
 		t.handler(Message{
-			ChatID:   strconv.FormatInt(chatID, 10),
-			UserID:   strconv.FormatInt(userID, 10),
-			Text:     text,
-			Images:   images,
-			Document: doc,
+			ChatID:    strconv.FormatInt(chatID, 10),
+			UserID:    strconv.FormatInt(userID, 10),
+			Text:      text,
+			Images:    images,
+			Document:  doc,
+			ReplyText: replyText,
 		})
 	}
 }

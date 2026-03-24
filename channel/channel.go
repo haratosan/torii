@@ -13,11 +13,12 @@ type Document struct {
 }
 
 type Message struct {
-	ChatID   string
-	UserID   string
-	Text     string
-	Images   [][]byte
-	Document *Document
+	ChatID    string
+	UserID    string
+	Text      string
+	Images    [][]byte
+	Document  *Document
+	ReplyText string
 }
 
 type Button struct {

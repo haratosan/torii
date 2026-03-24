@@ -88,10 +88,16 @@ func (a *Agent) HandleCommand(msg channel.Message) (string, bool) {
 }
 
 func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentResponse, error) {
+	// Build user content, including reply context if present
+	content := msg.Text
+	if msg.ReplyText != "" {
+		content = "[Replying to: " + msg.ReplyText + "]\n\n" + content
+	}
+
 	// Append user message to history
 	a.sessions.Append(msg.ChatID, llm.ChatMessage{
 		Role:    llm.RoleUser,
-		Content: msg.Text,
+		Content: content,
 		Images:  msg.Images,
 	})
 
@@ -117,8 +123,12 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 			return nil, fmt.Errorf("llm chat: %w", err)
 		}
 
-		// No tool calls → final answer
+		// No tool calls → final answer (or retry if empty)
 		if len(resp.ToolCalls) == 0 {
+			if resp.Content == "" {
+				a.logger.Warn("empty response from model, retrying", "round", round)
+				continue
+			}
 			a.sessions.Append(msg.ChatID, llm.ChatMessage{
 				Role:    llm.RoleAssistant,
 				Content: resp.Content,

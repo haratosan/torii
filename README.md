@@ -185,6 +185,7 @@ Optional extensions can be installed separately by cloning them into `extensions
 - **[torii-image](https://github.com/haratosan/torii-image)** -- generates or edits images via AI (OpenRouter)
 - **[torii-weather](https://github.com/haratosan/torii-weather)** -- returns current weather and forecast via Open-Meteo
 - **[torii-curl](https://github.com/haratosan/torii-curl)** -- makes HTTP requests to URLs and APIs
+- **[torii-email](https://github.com/haratosan/torii-email)** -- reads, searches, and drafts emails via IMAP
 
 Build all extensions:
 
