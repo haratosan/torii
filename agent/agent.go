@@ -101,6 +101,12 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 		Images:  msg.Images,
 	})
 
+	// Determine the chat ID for tool execution (may differ from session chat ID for cron tasks)
+	toolChatID := msg.ChatID
+	if msg.ToolChatID != "" {
+		toolChatID = msg.ToolChatID
+	}
+
 	// Build tool definitions from registry
 	tools := a.buildToolDefs()
 
@@ -161,7 +167,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 
 			a.logger.Info("tool call", "name", tc.Function.Name, "args", tc.Function.Arguments)
 
-			result, err := a.executor.Execute(ctx, tc.Function.Name, tc.Function.Arguments, msg.ChatID, msg.UserID, userImages)
+			result, err := a.executor.Execute(ctx, tc.Function.Name, tc.Function.Arguments, toolChatID, msg.UserID, userImages)
 			if err != nil {
 				a.logger.Error("tool execution failed", "name", tc.Function.Name, "error", err)
 				a.sessions.Append(msg.ChatID, llm.ChatMessage{

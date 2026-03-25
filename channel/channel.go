@@ -13,12 +13,13 @@ type Document struct {
 }
 
 type Message struct {
-	ChatID    string
-	UserID    string
-	Text      string
-	Images    [][]byte
-	Document  *Document
-	ReplyText string
+	ChatID     string
+	ToolChatID string // Used for tool execution (e.g. knowledge base). Falls back to ChatID if empty.
+	UserID     string
+	Text       string
+	Images     [][]byte
+	Document   *Document
+	ReplyText  string
 }
 
 type Button struct {

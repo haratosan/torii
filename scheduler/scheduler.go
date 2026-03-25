@@ -89,9 +89,10 @@ func (s *Scheduler) handleCron(ctx context.Context, task *store.Task) {
 	tmpChatID := fmt.Sprintf("cron:%d", task.ID)
 
 	result, err := s.agent.HandleMessage(taskCtx, channel.Message{
-		ChatID: tmpChatID,
-		UserID: task.UserID,
-		Text:   task.Description,
+		ChatID:     tmpChatID,
+		ToolChatID: task.ChatID,
+		UserID:     task.UserID,
+		Text:       task.Description,
 	})
 
 	// Clean up temporary session
