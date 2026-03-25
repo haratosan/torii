@@ -8,6 +8,7 @@ import (
 
 	"github.com/haratosan/torii/agent"
 	"github.com/haratosan/torii/channel"
+	"github.com/haratosan/torii/llm"
 	"github.com/haratosan/torii/session"
 	"github.com/haratosan/torii/store"
 	"github.com/robfig/cron/v3"
@@ -100,6 +101,11 @@ func (s *Scheduler) handleCron(ctx context.Context, task *store.Task) {
 	} else if result.Silent {
 		s.logger.Info("cron task silent, skipping send", "task_id", task.ID)
 	} else {
+		// Append only the final response to the real chat session so the user can reply
+		s.sessions.Append(task.ChatID, llm.ChatMessage{
+			Role:    llm.RoleAssistant,
+			Content: result.Text,
+		})
 		if err := s.channel.Send(ctx, channel.Response{ChatID: task.ChatID, Text: result.Text}); err != nil {
 			s.logger.Error("scheduler: send cron result", "error", err, "task_id", task.ID)
 		}
