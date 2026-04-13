@@ -15,6 +15,7 @@ clean:
 	rm -f extensions/torii-echo/torii-echo
 	rm -f extensions/torii-time/torii-time
 	rm -f extensions/torii-web/torii-web
+	rm -f extensions/torii-search/torii-search
 	rm -rf release/
 
 release: build
@@ -85,3 +86,4 @@ extensions:
 	cd extensions/torii-echo && go build -o torii-echo .
 	cd extensions/torii-time && go build -o torii-time .
 	cd extensions/torii-web && go build -o torii-web .
+	cd extensions/torii-search && go build -o torii-search .

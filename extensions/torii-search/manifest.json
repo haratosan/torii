@@ -1,0 +1,25 @@
+{
+  "name": "web_search",
+  "description": "Searches the web via Tavily and returns ranked results (title, URL, snippet). Use this to find current information, then optionally use web-fetch to read specific result pages in depth.",
+  "version": "0.1.0",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search query"
+      },
+      "max_results": {
+        "type": "integer",
+        "description": "Number of results to return (1-10, default 5)"
+      },
+      "depth": {
+        "type": "string",
+        "enum": ["basic", "advanced"],
+        "description": "basic = title/url/snippet only; advanced = also includes a short content excerpt per result"
+      }
+    },
+    "required": ["query"]
+  },
+  "env": ["TAVILY_API_KEY", "HTTP_PROXY", "HTTPS_PROXY"]
+}

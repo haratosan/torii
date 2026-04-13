@@ -39,6 +39,7 @@ extensions:
   env:                             # env vars passed to extensions (system env overrides these)
     # TORII_OPENROUTER_API_KEY: ""
     # TORII_IMAGE_MODEL: "google/gemini-3.1-flash-image-preview"
+    # TAVILY_API_KEY: ""             # web_search extension — free key at https://tavily.com (1k req/month)
 
 session:
   max_history: 50

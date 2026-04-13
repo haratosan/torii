@@ -11,6 +11,7 @@ config.yaml
 extensions/torii-echo/torii-echo
 extensions/torii-time/torii-time
 extensions/torii-web/torii-web
+extensions/torii-search/torii-search
 
 # Build
 dist/

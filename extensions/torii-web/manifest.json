@@ -1,6 +1,6 @@
 {
   "name": "web-fetch",
-  "description": "Fetches the content of a URL and returns the body text.",
+  "description": "Fetches a URL and returns the readable text content (HTML stripped). Use after web_search to read a specific result page in depth.",
   "version": "0.1.0",
   "parameters": {
     "type": "object",
