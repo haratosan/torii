@@ -177,7 +177,8 @@ Extensions are standalone executables that communicate with Torii via stdin/stdo
 
 - **torii-echo** -- echoes input back (example extension)
 - **torii-time** -- returns the current time
-- **torii-web** -- fetches web content
+- **torii-web** -- fetches a URL and returns readable plaintext (HTML stripped)
+- **torii-search** -- web search via [Tavily](https://tavily.com) (free 1k req/month, requires `TAVILY_API_KEY`)
 
 Optional extensions can be installed separately by cloning them into `extensions/`:
 
