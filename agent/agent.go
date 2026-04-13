@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/haratosan/torii/channel"
 	"github.com/haratosan/torii/config"
@@ -183,6 +184,13 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 				output = fmt.Sprintf("Error: %s", result.Error)
 			}
 
+			// Log tool result (truncated)
+			logOutput := output
+			if len(logOutput) > 200 {
+				logOutput = logOutput[:200] + "..."
+			}
+			a.logger.Info("tool result", "name", tc.Function.Name, "output", logOutput)
+
 			// Check for image_path and buttons in tool result data
 			if result.Data != nil {
 				if imgPath, ok := result.Data["image_path"].(string); ok && imgPath != "" {
@@ -198,6 +206,11 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 				Content:    output,
 				ToolCallID: tc.ID,
 			})
+		}
+
+		// If no-reply was called, stop the agent loop immediately
+		if silent {
+			return &AgentResponse{Silent: true, ImagePath: lastImagePath, Buttons: lastButtons}, nil
 		}
 	}
 
@@ -301,6 +314,14 @@ func (a *Agent) buildSystemPrompt(userID string) string {
 			sb.WriteString("After they answer, save their information using the memory tool.\n")
 		}
 	}
+
+	now := time.Now()
+	sb.WriteString(fmt.Sprintf(
+		"\nCurrent date and time: %s (%s, %s)\n",
+		now.Format("2006-01-02 15:04:05"),
+		now.Weekday().String(),
+		now.Format("MST"),
+	))
 
 	return sb.String()
 }
