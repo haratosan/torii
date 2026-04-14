@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/haratosan/torii/extension"
@@ -23,13 +24,13 @@ func NewKnowledgeTool(ks *knowledge.KnowledgeStore) *extension.BuiltinTool {
 	return &extension.BuiltinTool{
 		Def: extension.Manifest{
 			Name:        "knowledge",
-			Description: "Manage the chat's knowledge base for semantic search. Actions: add (store a document), search (find relevant content), list (show all documents), delete (remove a document). Use this to store and retrieve information that should be searchable by meaning.",
+			Description: "Manage the chat's knowledge base. Actions: add (store a document), search (semantic lookup — find content by meaning), list (browse available documents — returns IDs + titles only, NOT content), get (read the FULL content of one document by id — always use this after list or search to actually read a document), delete (IRREVERSIBLY remove a document — only when the user explicitly asks to delete). Prefer `search` first; if results are weak, `list` then `get` by id.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"enum":        []any{"add", "search", "list", "delete"},
+						"enum":        []any{"add", "search", "list", "get", "delete"},
 						"description": "The action to perform",
 					},
 					"title": map[string]any{
@@ -50,7 +51,7 @@ func NewKnowledgeTool(ks *knowledge.KnowledgeStore) *extension.BuiltinTool {
 					},
 					"id": map[string]any{
 						"type":        "integer",
-						"description": "Document ID (for delete action)",
+						"description": "Document ID (for get and delete actions)",
 					},
 				},
 				"required": []any{"action"},
@@ -105,19 +106,34 @@ func NewKnowledgeTool(ks *knowledge.KnowledgeStore) *extension.BuiltinTool {
 				}
 
 				var sb strings.Builder
+				sb.WriteString(fmt.Sprintf("%d document(s). Use `get` with an id to read full content.\n", len(docs)))
 				for _, d := range docs {
-					contentPreview := d.Content
-					if len(contentPreview) > 100 {
-						contentPreview = contentPreview[:100] + "..."
-					}
-					sb.WriteString(fmt.Sprintf("ID: %d | %s | %s\n", d.ID, d.Title, contentPreview))
+					sb.WriteString(fmt.Sprintf("- ID: %d | %s (%d chars)\n", d.ID, d.Title, len(d.Content)))
 				}
 				return &extension.ExtResponse{Output: sb.String()}, nil
+
+			case "get":
+				if args.ID <= 0 {
+					return &extension.ExtResponse{Error: "id is required for get action"}, nil
+				}
+				doc, err := ks.Get(req.ChatID, args.ID)
+				if err != nil {
+					return &extension.ExtResponse{Error: fmt.Sprintf("get failed: %s", err)}, nil
+				}
+				return &extension.ExtResponse{
+					Output: fmt.Sprintf("Title: %s\n\n%s", doc.Title, doc.Content),
+					Data:   map[string]any{"id": doc.ID, "title": doc.Title, "length": len(doc.Content)},
+				}, nil
 
 			case "delete":
 				if args.ID <= 0 {
 					return &extension.ExtResponse{Error: "id is required for delete action"}, nil
 				}
+				slog.Warn("knowledge delete",
+					"doc_id", args.ID,
+					"chat_id", req.ChatID,
+					"user_id", req.UserID,
+				)
 				if err := ks.Delete(req.ChatID, args.ID); err != nil {
 					return &extension.ExtResponse{Error: fmt.Sprintf("delete failed: %s", err)}, nil
 				}

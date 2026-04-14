@@ -35,35 +35,37 @@ func NewKnowledgeStore(db *store.Store, embedder Embedder, chunkSize int, overla
 	}
 }
 
-// Add stores a document: chunks the content, generates embeddings, and persists everything.
+// Add stores a document: chunks the content, generates embeddings, and
+// persists everything atomically. If anything fails — chunking, embedding,
+// or the DB write — nothing is persisted. This avoids the previous footgun
+// where a transient embedder outage would silently delete freshly-inserted
+// documents.
 func (k *KnowledgeStore) Add(ctx context.Context, chatID string, title string, content string) (int64, error) {
-	docID, err := k.db.CreateKBDocument(chatID, title, content)
-	if err != nil {
-		return 0, fmt.Errorf("create document: %w", err)
-	}
-
 	chunks := Chunk(content, k.chunkSize, k.overlap)
+
+	// Document with no chunkable content — persist it on its own so
+	// list/delete still work, but there's nothing to embed.
 	if len(chunks) == 0 {
-		return docID, nil
+		return k.db.CreateKBDocumentWithChunks(chatID, title, content, nil, nil)
 	}
 
 	embeddings, err := k.embedder.EmbedBatch(ctx, chunks)
 	if err != nil {
-		// Clean up the document if embedding fails
-		k.db.DeleteKBDocument(chatID, docID)
 		return 0, fmt.Errorf("embed chunks: %w", err)
 	}
-
-	for i, chunk := range chunks {
-		if i >= len(embeddings) {
-			break
-		}
-		blob := float32sToBytes(embeddings[i])
-		if err := k.db.CreateKBChunk(docID, chatID, chunk, blob); err != nil {
-			return 0, fmt.Errorf("store chunk: %w", err)
-		}
+	if len(embeddings) != len(chunks) {
+		return 0, fmt.Errorf("embedder returned %d embeddings for %d chunks", len(embeddings), len(chunks))
 	}
 
+	blobs := make([][]byte, len(embeddings))
+	for i, e := range embeddings {
+		blobs[i] = float32sToBytes(e)
+	}
+
+	docID, err := k.db.CreateKBDocumentWithChunks(chatID, title, content, chunks, blobs)
+	if err != nil {
+		return 0, fmt.Errorf("persist document: %w", err)
+	}
 	return docID, nil
 }
 
@@ -124,6 +126,11 @@ func (k *KnowledgeStore) Search(ctx context.Context, chatID string, query string
 // List returns all documents in the chat's knowledge base.
 func (k *KnowledgeStore) List(chatID string) ([]store.KBDocument, error) {
 	return k.db.ListKBDocuments(chatID)
+}
+
+// Get returns the full document (content included) by ID, scoped to chatID.
+func (k *KnowledgeStore) Get(chatID string, docID int64) (*store.KBDocument, error) {
+	return k.db.GetKBDocument(chatID, docID)
 }
 
 // Delete removes a document and its chunks from the knowledge base.

@@ -90,6 +90,10 @@ func main() {
 	defer db.Close()
 	logger.Info("database opened", "path", cfg.Scheduler.DBPath)
 
+	if docs, chunks, chats, err := db.CountKBDocuments(); err == nil {
+		logger.Info("kb stats", "documents", docs, "chunks", chunks, "chats", chats)
+	}
+
 	// Setup LLM provider
 	var provider llm.Provider
 	switch cfg.LLM.Provider {

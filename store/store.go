@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -324,15 +325,58 @@ type KBChunk struct {
 	Embedding  []byte
 }
 
-func (s *Store) CreateKBDocument(chatID string, title string, content string) (int64, error) {
-	res, err := s.db.Exec(
+// CreateKBDocumentWithChunks atomically inserts a document and all of its
+// chunks inside a single transaction. Either everything is persisted or
+// nothing — we never leave a document without its chunks, or chunks without
+// their parent document. `chunks` and `embeddings` must be the same length.
+func (s *Store) CreateKBDocumentWithChunks(chatID, title, content string, chunks []string, embeddings [][]byte) (int64, error) {
+	if len(chunks) != len(embeddings) {
+		return 0, fmt.Errorf("chunks/embeddings length mismatch: %d vs %d", len(chunks), len(embeddings))
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(
 		`INSERT INTO kb_documents (chat_id, title, content) VALUES (?, ?, ?)`,
 		chatID, title, content,
 	)
 	if err != nil {
 		return 0, err
 	}
-	return res.LastInsertId()
+	docID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	for i, chunk := range chunks {
+		if _, err := tx.Exec(
+			`INSERT INTO kb_chunks (document_id, chat_id, content, embedding) VALUES (?, ?, ?, ?)`,
+			docID, chatID, chunk, embeddings[i],
+		); err != nil {
+			return 0, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return docID, nil
+}
+
+// CountKBDocuments returns the total number of KB documents and distinct chat_ids.
+func (s *Store) CountKBDocuments() (docs int, chunks int, chats int, err error) {
+	if err = s.db.QueryRow(`SELECT COUNT(*) FROM kb_documents`).Scan(&docs); err != nil {
+		return
+	}
+	if err = s.db.QueryRow(`SELECT COUNT(*) FROM kb_chunks`).Scan(&chunks); err != nil {
+		return
+	}
+	err = s.db.QueryRow(`SELECT COUNT(DISTINCT chat_id) FROM kb_documents`).Scan(&chats)
+	return
 }
 
 func (s *Store) ListKBDocuments(chatID string) ([]KBDocument, error) {
@@ -356,6 +400,18 @@ func (s *Store) ListKBDocuments(chatID string) ([]KBDocument, error) {
 	return docs, rows.Err()
 }
 
+func (s *Store) GetKBDocument(chatID string, docID int64) (*KBDocument, error) {
+	var d KBDocument
+	err := s.db.QueryRow(
+		`SELECT id, chat_id, title, content, created_at FROM kb_documents WHERE id = ? AND chat_id = ?`,
+		docID, chatID,
+	).Scan(&d.ID, &d.ChatID, &d.Title, &d.Content, &d.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
 func (s *Store) GetKBDocumentTitle(docID int64) (string, error) {
 	var title string
 	err := s.db.QueryRow(`SELECT title FROM kb_documents WHERE id = ?`, docID).Scan(&title)
@@ -371,14 +427,6 @@ func (s *Store) DeleteKBDocument(chatID string, docID int64) error {
 		return err
 	}
 	_, err := s.db.Exec(`DELETE FROM kb_documents WHERE id = ? AND chat_id = ?`, docID, chatID)
-	return err
-}
-
-func (s *Store) CreateKBChunk(docID int64, chatID string, content string, embedding []byte) error {
-	_, err := s.db.Exec(
-		`INSERT INTO kb_chunks (document_id, chat_id, content, embedding) VALUES (?, ?, ?, ?)`,
-		docID, chatID, content, embedding,
-	)
 	return err
 }
 
