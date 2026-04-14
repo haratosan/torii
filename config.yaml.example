@@ -80,7 +80,10 @@ mcp:
 
 knowledge:
   enabled: false
-  embedding_model: "nomic-embed-text"   # must be pulled in Ollama
+  embedding_model: "nomic-embed-text"   # must be pulled in Ollama. For non-English
+                                        # content prefer a multilingual model like
+                                        # `bge-m3` (ollama pull bge-m3). After changing
+                                        # this, ask the bot to `knowledge reembed`.
   vision_model: "llava"                 # for PDF text extraction via vision OCR
   max_pdf_pages: 20                     # max pages to process per PDF
   chunk_size: 500                       # tokens per chunk

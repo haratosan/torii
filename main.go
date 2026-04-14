@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/haratosan/torii/agent"
 	"github.com/haratosan/torii/builtin"
@@ -142,6 +143,29 @@ func main() {
 		ks = knowledge.NewKnowledgeStore(db, embedder, cfg.Knowledge.ChunkSize, cfg.Knowledge.ChunkOverlap)
 		registry.RegisterBuiltin(builtin.NewKnowledgeTool(ks))
 		logger.Info("knowledge base enabled", "model", cfg.Knowledge.EmbeddingModel)
+
+		// Warn if the stored embedding dimension doesn't match what the
+		// current model produces — this happens after switching
+		// embedding_model without running `knowledge reembed`.
+		go func() {
+			dbDim, err := db.SampleKBChunkDimension()
+			if err != nil || dbDim == 0 {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			probe, err := embedder.Embed(ctx, "dimension probe")
+			if err != nil || len(probe) == 0 {
+				return
+			}
+			if len(probe) != dbDim {
+				logger.Warn("embedding dimension mismatch — existing chunks are unusable, run `knowledge reembed`",
+					"db_dim", dbDim,
+					"model_dim", len(probe),
+					"model", cfg.Knowledge.EmbeddingModel,
+				)
+			}
+		}()
 	}
 
 	if cfg.Sandbox.Enabled {

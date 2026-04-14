@@ -24,13 +24,13 @@ func NewKnowledgeTool(ks *knowledge.KnowledgeStore) *extension.BuiltinTool {
 	return &extension.BuiltinTool{
 		Def: extension.Manifest{
 			Name:        "knowledge",
-			Description: "Manage the chat's knowledge base. Actions: add (store a document), search (semantic lookup — find content by meaning), list (browse available documents — returns IDs + titles only, NOT content), get (read the FULL content of one document by id — always use this after list or search to actually read a document), delete (IRREVERSIBLY remove a document — only when the user explicitly asks to delete). Prefer `search` first; if results are weak, `list` then `get` by id.",
+			Description: "Manage the chat's knowledge base. Actions: add (store a document), search (semantic lookup — returns scored matches AND a footer listing ALL available documents by id+title), list (browse available documents — returns IDs + titles only, NOT content), get (read the FULL content of one document by id — always use this after list or search to actually read a document), reembed (re-chunk and re-embed ALL documents using the current embedding model — run after switching embedding_model in config), delete (IRREVERSIBLY remove a document — only when the user explicitly asks to delete). Flow: call `search`; if the top scored results don't obviously answer the question, pick a promising title from the footer and call `get` with its id.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"enum":        []any{"add", "search", "list", "get", "delete"},
+						"enum":        []any{"add", "search", "list", "get", "reembed", "delete"},
 						"description": "The action to perform",
 					},
 					"title": map[string]any{
@@ -80,20 +80,37 @@ func NewKnowledgeTool(ks *knowledge.KnowledgeStore) *extension.BuiltinTool {
 				}
 				topK := args.TopK
 				if topK <= 0 {
-					topK = 5
+					topK = 10
 				}
 				results, err := ks.Search(ctx, req.ChatID, args.Query, topK)
 				if err != nil {
 					return &extension.ExtResponse{Error: fmt.Sprintf("search failed: %s", err)}, nil
 				}
-				if len(results) == 0 {
-					return &extension.ExtResponse{Output: "No results found."}, nil
-				}
 
 				var sb strings.Builder
-				for i, r := range results {
-					sb.WriteString(fmt.Sprintf("[%d] (doc: %s, score: %.3f)\n%s\n\n", i+1, r.DocumentTitle, r.Score, r.Content))
+				if len(results) == 0 {
+					sb.WriteString("No scored matches.\n")
+				} else {
+					for i, r := range results {
+						sb.WriteString(fmt.Sprintf("[%d] (doc: %s, score: %.3f)\n%s\n\n", i+1, r.DocumentTitle, r.Score, r.Content))
+					}
 				}
+
+				// Always append a full document index so the LLM can fall back
+				// to `get` when scored matches miss the mark (e.g. weak
+				// multilingual embedding ranking).
+				if docs, err := ks.List(req.ChatID); err == nil && len(docs) > 0 {
+					sb.WriteString(fmt.Sprintf("Available documents (%d total) — use `get` with id for full content:\n", len(docs)))
+					const maxFooterDocs = 50
+					for i, d := range docs {
+						if i >= maxFooterDocs {
+							sb.WriteString(fmt.Sprintf("- … and %d more (use `list`)\n", len(docs)-maxFooterDocs))
+							break
+						}
+						sb.WriteString(fmt.Sprintf("- %d: %s (%d chars)\n", d.ID, d.Title, len(d.Content)))
+					}
+				}
+
 				return &extension.ExtResponse{Output: sb.String()}, nil
 
 			case "list":
@@ -123,6 +140,17 @@ func NewKnowledgeTool(ks *knowledge.KnowledgeStore) *extension.BuiltinTool {
 				return &extension.ExtResponse{
 					Output: fmt.Sprintf("Title: %s\n\n%s", doc.Title, doc.Content),
 					Data:   map[string]any{"id": doc.ID, "title": doc.Title, "length": len(doc.Content)},
+				}, nil
+
+			case "reembed":
+				stats, err := ks.Reembed(ctx, req.ChatID)
+				if err != nil {
+					return &extension.ExtResponse{Error: fmt.Sprintf("reembed failed after %d docs: %s", stats.Documents, err)}, nil
+				}
+				slog.Info("knowledge reembed", "chat_id", req.ChatID, "documents", stats.Documents, "chunks", stats.Chunks)
+				return &extension.ExtResponse{
+					Output: fmt.Sprintf("Re-embedded %d documents, %d chunks using current embedding model.", stats.Documents, stats.Chunks),
+					Data:   map[string]any{"documents": stats.Documents, "chunks": stats.Chunks},
 				}, nil
 
 			case "delete":

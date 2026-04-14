@@ -138,6 +138,57 @@ func (k *KnowledgeStore) Delete(chatID string, docID int64) error {
 	return k.db.DeleteKBDocument(chatID, docID)
 }
 
+// ReembedStats summarizes a re-embed run.
+type ReembedStats struct {
+	Documents int
+	Chunks    int
+}
+
+// Reembed re-chunks and re-embeds every document in the given chat using the
+// current embedder. Use this after switching the embedding model. Each
+// document's chunk set is replaced atomically; failure of one document
+// aborts the run so nothing ends up half-updated.
+func (k *KnowledgeStore) Reembed(ctx context.Context, chatID string) (ReembedStats, error) {
+	var stats ReembedStats
+
+	docs, err := k.db.ListKBDocuments(chatID)
+	if err != nil {
+		return stats, fmt.Errorf("list documents: %w", err)
+	}
+
+	for _, d := range docs {
+		chunks := Chunk(d.Content, k.chunkSize, k.overlap)
+		if len(chunks) == 0 {
+			if err := k.db.ReplaceKBChunks(d.ID, chatID, nil, nil); err != nil {
+				return stats, fmt.Errorf("doc %d replace: %w", d.ID, err)
+			}
+			stats.Documents++
+			continue
+		}
+
+		embeddings, err := k.embedder.EmbedBatch(ctx, chunks)
+		if err != nil {
+			return stats, fmt.Errorf("doc %d embed: %w", d.ID, err)
+		}
+		if len(embeddings) != len(chunks) {
+			return stats, fmt.Errorf("doc %d: embedder returned %d embeddings for %d chunks", d.ID, len(embeddings), len(chunks))
+		}
+
+		blobs := make([][]byte, len(embeddings))
+		for i, e := range embeddings {
+			blobs[i] = float32sToBytes(e)
+		}
+
+		if err := k.db.ReplaceKBChunks(d.ID, chatID, chunks, blobs); err != nil {
+			return stats, fmt.Errorf("doc %d replace: %w", d.ID, err)
+		}
+		stats.Documents++
+		stats.Chunks += len(chunks)
+	}
+
+	return stats, nil
+}
+
 func cosineSimilarity(a, b []float32) float64 {
 	if len(a) != len(b) {
 		return 0

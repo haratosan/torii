@@ -367,6 +367,49 @@ func (s *Store) CreateKBDocumentWithChunks(chatID, title, content string, chunks
 	return docID, nil
 }
 
+// ReplaceKBChunks atomically replaces all chunks of an existing document with
+// a fresh set. Used by the re-embed flow after switching embedding models.
+// The parent kb_documents row is untouched.
+func (s *Store) ReplaceKBChunks(docID int64, chatID string, chunks []string, embeddings [][]byte) error {
+	if len(chunks) != len(embeddings) {
+		return fmt.Errorf("chunks/embeddings length mismatch: %d vs %d", len(chunks), len(embeddings))
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM kb_chunks WHERE document_id = ? AND chat_id = ?`, docID, chatID); err != nil {
+		return err
+	}
+	for i, chunk := range chunks {
+		if _, err := tx.Exec(
+			`INSERT INTO kb_chunks (document_id, chat_id, content, embedding) VALUES (?, ?, ?, ?)`,
+			docID, chatID, chunk, embeddings[i],
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// SampleKBChunkDimension returns the byte-length of any chunk's embedding blob
+// (i.e. dimension * 4 for float32). Used to detect dimension mismatches after
+// an embedding-model switch. Returns 0 if there are no chunks.
+func (s *Store) SampleKBChunkDimension() (int, error) {
+	var length int
+	err := s.db.QueryRow(`SELECT LENGTH(embedding) FROM kb_chunks WHERE embedding IS NOT NULL LIMIT 1`).Scan(&length)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return length / 4, nil
+}
+
 // CountKBDocuments returns the total number of KB documents and distinct chat_ids.
 func (s *Store) CountKBDocuments() (docs int, chunks int, chats int, err error) {
 	if err = s.db.QueryRow(`SELECT COUNT(*) FROM kb_documents`).Scan(&docs); err != nil {
