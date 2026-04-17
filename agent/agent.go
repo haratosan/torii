@@ -152,7 +152,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 		// Store assistant message with tool calls
 		a.sessions.Append(msg.ChatID, llm.ChatMessage{
 			Role:      llm.RoleAssistant,
-			Content:   resp.Content,
+			Content:   stripModelArtifacts(resp.Content),
 			ToolCalls: resp.ToolCalls,
 		})
 
