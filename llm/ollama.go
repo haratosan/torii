@@ -116,10 +116,15 @@ func (o *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		})
 	}
 
+	// Enable thinking so Ollama separates <think> content into the
+	// Thinking field instead of leaking tags into Content.
+	thinkOn := &api.ThinkValue{Value: true}
+
 	chatReq := &api.ChatRequest{
 		Model:    o.model,
 		Messages: messages,
 		Tools:    tools,
+		Think:    thinkOn,
 		Stream:   new(bool), // false = no streaming
 	}
 
