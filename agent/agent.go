@@ -272,7 +272,26 @@ func (a *Agent) buildMessages(chatID string, userID string) []llm.ChatMessage {
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: prompt},
 	}
-	messages = append(messages, a.sessions.History(chatID)...)
+	history := a.sessions.History(chatID)
+	// Strip images from all messages except the most recent user message.
+	// Historical images are huge, waste tokens, and cause repeated vision-
+	// fallback triggers when the main model doesn't support images.
+	lastUserIdx := -1
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == llm.RoleUser && len(history[i].Images) > 0 {
+			lastUserIdx = i
+			break
+		}
+	}
+	for i, m := range history {
+		if i != lastUserIdx && len(m.Images) > 0 {
+			cleaned := m
+			cleaned.Images = nil
+			messages = append(messages, cleaned)
+		} else {
+			messages = append(messages, m)
+		}
+	}
 	return messages
 }
 
