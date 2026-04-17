@@ -396,14 +396,18 @@ func (a *Agent) buildToolDefs() []llm.ToolDef {
 }
 
 // stripModelArtifacts removes internal markers that reasoning models leak
-// into their output: <think> blocks, tool-call section markers, etc.
+// into their output: <think> blocks, lone closing tags, tool-call markers, etc.
 var (
-	thinkRe    = regexp.MustCompile(`(?s)<think>.*?</think>\s*`)
-	toolTagsRe = regexp.MustCompile(`(?s)<\|tool_calls_section_begin\|>.*?<\|tool_calls_section_end\|>\s*`)
+	thinkRe      = regexp.MustCompile(`(?s)<think>.*?</think>\s*`)
+	thinkOpenRe  = regexp.MustCompile(`(?s)<think>.*`)           // unclosed <think> to end of string
+	thinkCloseRe = regexp.MustCompile(`</think>\s*`)             // lone </think> without opener
+	toolTagsRe   = regexp.MustCompile(`(?s)<\|tool_calls_section_begin\|>.*?<\|tool_calls_section_end\|>\s*`)
 )
 
 func stripModelArtifacts(s string) string {
 	s = thinkRe.ReplaceAllString(s, "")
+	s = thinkOpenRe.ReplaceAllString(s, "")
+	s = thinkCloseRe.ReplaceAllString(s, "")
 	s = toolTagsRe.ReplaceAllString(s, "")
 	return strings.TrimSpace(s)
 }
