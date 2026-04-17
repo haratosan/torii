@@ -57,19 +57,12 @@ type TelegramConfig struct {
 }
 
 type LLMConfig struct {
-	Provider   string           `yaml:"provider"`
-	Ollama     OllamaConfig     `yaml:"ollama"`
-	OpenRouter OpenRouterConfig `yaml:"openrouter"`
+	Ollama OllamaConfig `yaml:"ollama"`
 }
 
 type OllamaConfig struct {
 	Host  string `yaml:"host"`
 	Model string `yaml:"model"`
-}
-
-type OpenRouterConfig struct {
-	APIKey string `yaml:"api_key"`
-	Model  string `yaml:"model"`
 }
 
 type ExtensionsConfig struct {
@@ -172,13 +165,9 @@ Scheduling:
 			AgentTimeout:  "5m",
 		},
 		LLM: LLMConfig{
-			Provider: "ollama",
 			Ollama: OllamaConfig{
 				Host:  "http://localhost:11434",
 				Model: "llama3.2",
-			},
-			OpenRouter: OpenRouterConfig{
-				Model: "anthropic/claude-sonnet-4",
 			},
 		},
 		Extensions: ExtensionsConfig{
@@ -230,20 +219,11 @@ Scheduling:
 	if v := os.Getenv("TORII_TELEGRAM_TOKEN"); v != "" {
 		cfg.Telegram.Token = v
 	}
-	if v := os.Getenv("TORII_OPENROUTER_API_KEY"); v != "" {
-		cfg.LLM.OpenRouter.APIKey = v
-	}
-	if v := os.Getenv("TORII_LLM_PROVIDER"); v != "" {
-		cfg.LLM.Provider = v
-	}
 	if v := os.Getenv("TORII_OLLAMA_HOST"); v != "" {
 		cfg.LLM.Ollama.Host = v
 	}
 	if v := os.Getenv("TORII_OLLAMA_MODEL"); v != "" {
 		cfg.LLM.Ollama.Model = v
-	}
-	if v := os.Getenv("TORII_OPENROUTER_MODEL"); v != "" {
-		cfg.LLM.OpenRouter.Model = v
 	}
 	if v := os.Getenv("TORII_LOG_LEVEL"); v != "" {
 		cfg.Gateway.LogLevel = v

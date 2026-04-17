@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"strings"
 
+	"github.com/google/shlex"
 	"github.com/haratosan/torii/config"
 	"github.com/haratosan/torii/extension"
 )
@@ -56,12 +56,19 @@ func NewShellTool(cfg *config.ShellConfig) *extension.BuiltinTool {
 				return &extension.ExtResponse{Error: fmt.Sprintf("command not allowed: %s", args.Command)}, nil
 			}
 
+			parts, err := shlex.Split(args.Command)
+			if err != nil {
+				return &extension.ExtResponse{Error: "invalid shell syntax: " + err.Error()}, nil
+			}
+			if len(parts) == 0 {
+				return &extension.ExtResponse{Error: "empty command"}, nil
+			}
+
 			// Execute
 			timeout := cfg.TimeoutDuration()
 			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			parts := strings.Fields(args.Command)
 			cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
 
 			var stdout, stderr bytes.Buffer
@@ -100,8 +107,8 @@ func isCommandAllowed(command string, allowedCommands []string) bool {
 	if len(allowedCommands) == 0 {
 		return true // empty list = all commands allowed
 	}
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
+	parts, err := shlex.Split(command)
+	if err != nil || len(parts) == 0 {
 		return false
 	}
 	base := parts[0]

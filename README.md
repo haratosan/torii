@@ -4,12 +4,12 @@
 
 # Torii
 
-An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or OpenRouter). Torii supports tool-calling via built-in tools, external extensions, and MCP servers. Features include persistent sessions, scheduled tasks, user memory, inline keyboards, and a per-chat knowledge base with RAG.
+An extensible AI assistant that connects to Telegram, powered by a local Ollama LLM. Torii supports tool-calling via built-in tools, external extensions, and MCP servers. Features include persistent sessions, scheduled tasks, user memory, inline keyboards, and a per-chat knowledge base with RAG.
 
 ## Features
 
 - **Telegram integration** -- chat with your AI assistant via Telegram
-- **Multiple LLM backends** -- Ollama (local) or OpenRouter (cloud)
+- **Local LLM** -- powered by Ollama
 - **Extension system** -- add custom tools as standalone executables
 - **Built-in tools** -- memory, bot profile, shell access, sandbox (containerized), reminders, cron jobs, inline keyboards, knowledge base, no-reply (silent response suppression)
 - **MCP client** -- connect to any MCP server (stdio or SSE) to extend tool capabilities
@@ -23,7 +23,7 @@ An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or
 
 - Go 1.24+
 - Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
-- Ollama running locally, or an OpenRouter API key
+- Ollama running locally
 - (Optional) Sandbox: Apple Containers on macOS (`brew install container` + `container system start`) or Docker on Linux
 - (Optional) Knowledge base: Ollama with `nomic-embed-text` model (`ollama pull nomic-embed-text`)
 - (Optional) PDF import: `poppler` for PDF-to-image conversion (`brew install poppler` on macOS, `apt install poppler-utils` on Linux) and a vision model in Ollama (`ollama pull llava`)
@@ -36,7 +36,7 @@ An extensible AI assistant that connects to Telegram, powered by LLMs (Ollama or
 cp config.yaml.example config.yaml
 ```
 
-2. Set your Telegram token and LLM provider in `config.yaml`.
+2. Set your Telegram token and Ollama settings in `config.yaml`.
 
 3. Build and run:
 
@@ -48,17 +48,14 @@ make run
 
 See `config.yaml.example` for all available options. All settings can be configured in `config.yaml` or overridden via environment variables:
 
-Extension-specific environment variables (e.g. `TORII_OPENROUTER_API_KEY`, `TORII_IMAGE_MODEL`) can also be set under `extensions.env` in `config.yaml`.
+Extension-specific environment variables (e.g. `TORII_OPENROUTER_API_KEY`, `TORII_IMAGE_MODEL`) can also be set under `extensions.env` in `config.yaml` for extensions that need them.
 
-| Variable                   | Description              |
-|----------------------------|--------------------------|
-| `TORII_TELEGRAM_TOKEN`     | Telegram bot token       |
-| `TORII_LLM_PROVIDER`      | `ollama` or `openrouter` |
-| `TORII_OLLAMA_HOST`        | Ollama API URL           |
-| `TORII_OLLAMA_MODEL`       | Ollama model name        |
-| `TORII_OPENROUTER_API_KEY` | OpenRouter API key       |
-| `TORII_OPENROUTER_MODEL`   | OpenRouter model name    |
-| `TORII_LOG_LEVEL`          | Log level (e.g. `debug`) |
+| Variable               | Description              |
+|------------------------|--------------------------|
+| `TORII_TELEGRAM_TOKEN` | Telegram bot token       |
+| `TORII_OLLAMA_HOST`    | Ollama API URL           |
+| `TORII_OLLAMA_MODEL`   | Ollama model name        |
+| `TORII_LOG_LEVEL`      | Log level (e.g. `debug`) |
 
 ## Install / Uninstall
 
@@ -167,7 +164,7 @@ These Telegram commands are handled directly by the bot without going through th
 | Command | Description |
 |---------|-------------|
 | `/new` | Clear the current session and start fresh |
-| `/status` | Show session message count, LLM provider, and model |
+| `/status` | Show session message count and model |
 | `/system` | Show the current system prompt |
 | `/help` | List available commands |
 
@@ -216,7 +213,7 @@ extensions/      -- example extension binaries
 gateway/         -- message routing between channel and agent
 knowledge/       -- RAG: chunking, embedding, vector search
 pdf/             -- PDF-to-text via pdftoppm + vision OCR
-llm/             -- LLM provider abstraction (Ollama, OpenRouter)
+llm/             -- Ollama provider
 mcp/             -- MCP client (stdio/SSE) and server manager
 scheduler/       -- background task scheduler
 session/         -- per-user session/history management (DB-backed)

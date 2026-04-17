@@ -95,33 +95,19 @@ func main() {
 		logger.Info("kb stats", "documents", docs, "chunks", chunks, "chats", chats)
 	}
 
-	// Setup LLM provider
-	var provider llm.Provider
-	switch cfg.LLM.Provider {
-	case "ollama":
-		ollamaProvider, ollamaErr := llm.NewOllama(cfg.LLM.Ollama.Host, cfg.LLM.Ollama.Model, logger)
-		if ollamaErr != nil {
-			logger.Error("ollama provider error", "error", ollamaErr)
-			os.Exit(1)
-		}
-		if vm := cfg.Knowledge.VisionModel; vm != "" {
-			ollamaProvider.SetVisionModel(vm)
-			logger.Info("using ollama", "host", cfg.LLM.Ollama.Host, "model", cfg.LLM.Ollama.Model, "vision_model", vm)
-		} else {
-			logger.Info("using ollama", "host", cfg.LLM.Ollama.Host, "model", cfg.LLM.Ollama.Model)
-		}
-		provider = ollamaProvider
-	case "openrouter":
-		if cfg.LLM.OpenRouter.APIKey == "" {
-			logger.Error("openrouter api key required (set TORII_OPENROUTER_API_KEY or config.yaml)")
-			os.Exit(1)
-		}
-		provider = llm.NewOpenRouter(cfg.LLM.OpenRouter.APIKey, cfg.LLM.OpenRouter.Model, logger)
-		logger.Info("using openrouter", "model", cfg.LLM.OpenRouter.Model)
-	default:
-		logger.Error("unknown llm provider", "provider", cfg.LLM.Provider)
+	// Setup LLM provider (Ollama)
+	ollamaProvider, err := llm.NewOllama(cfg.LLM.Ollama.Host, cfg.LLM.Ollama.Model, logger)
+	if err != nil {
+		logger.Error("ollama provider error", "error", err)
 		os.Exit(1)
 	}
+	if vm := cfg.Knowledge.VisionModel; vm != "" {
+		ollamaProvider.SetVisionModel(vm)
+		logger.Info("using ollama", "host", cfg.LLM.Ollama.Host, "model", cfg.LLM.Ollama.Model, "vision_model", vm)
+	} else {
+		logger.Info("using ollama", "host", cfg.LLM.Ollama.Host, "model", cfg.LLM.Ollama.Model)
+	}
+	var provider llm.Provider = ollamaProvider
 
 	// Setup extensions
 	registry := extension.NewRegistry(logger)
@@ -186,16 +172,7 @@ func main() {
 	sessions := session.NewStore(cfg.Session.MaxHistory, db, logger)
 
 	// Setup agent
-	// Determine model name based on provider
-	var modelName string
-	switch cfg.LLM.Provider {
-	case "ollama":
-		modelName = cfg.LLM.Ollama.Model
-	case "openrouter":
-		modelName = cfg.LLM.OpenRouter.Model
-	}
-
-	ag := agent.New(provider, executor, registry, sessions, db, cfg.Gateway.SystemPrompt, cfg.Gateway.MaxToolRounds, &cfg.Onboarding, cfg.LLM.Provider, modelName, logger)
+	ag := agent.New(provider, executor, registry, sessions, db, cfg.Gateway.SystemPrompt, cfg.Gateway.MaxToolRounds, &cfg.Onboarding, "ollama", cfg.LLM.Ollama.Model, logger)
 
 	// Setup MCP servers
 	if len(cfg.MCP.Servers) > 0 {

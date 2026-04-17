@@ -112,6 +112,7 @@ func (t *Telegram) sendPhoto(ctx context.Context, chatID int64, imagePath string
 		return fmt.Errorf("open image: %w", err)
 	}
 	defer f.Close()
+	defer os.Remove(imagePath)
 
 	// Telegram caption limit is 1024 characters
 	if len(caption) > 1024 {
@@ -126,10 +127,6 @@ func (t *Telegram) sendPhoto(ctx context.Context, chatID int64, imagePath string
 		},
 		Caption: caption,
 	})
-
-	// Clean up the image file after sending
-	os.Remove(imagePath)
-
 	if err != nil {
 		return fmt.Errorf("send photo: %w", err)
 	}
@@ -300,7 +297,11 @@ func (t *Telegram) handleVoice(ctx context.Context, b *bot.Bot, voice *models.Vo
 
 	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", t.token, file.FilePath)
 
-	resp, err := http.Get(fileURL)
+	req, err := http.NewRequestWithContext(ctx, "GET", fileURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("build voice request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download voice: %w", err)
 	}
@@ -335,7 +336,11 @@ func (t *Telegram) downloadFile(ctx context.Context, b *bot.Bot, fileID string) 
 
 	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", t.token, file.FilePath)
 
-	resp, err := http.Get(fileURL)
+	req, err := http.NewRequestWithContext(ctx, "GET", fileURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build file request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("download file: %w", err)
 	}

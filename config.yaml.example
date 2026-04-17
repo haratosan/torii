@@ -25,13 +25,9 @@ telegram:
   allowed_users: []            # empty = all allowed
 
 llm:
-  provider: "ollama"           # "ollama" or "openrouter"
   ollama:
     host: "http://localhost:11434"
     model: "llama3.2"
-  openrouter:
-    api_key: ""                # or TORII_OPENROUTER_API_KEY env
-    model: "anthropic/claude-sonnet-4"
 
 extensions:
   dirs: ["./extensions"]

@@ -121,6 +121,10 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 
 	// Agent loop: LLM may request tool calls multiple times
 	for round := 0; round < a.maxToolRounds; round++ {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("agent loop cancelled: %w", err)
+		}
+
 		messages := a.buildMessages(msg.ChatID, msg.UserID)
 
 		resp, err := a.provider.Chat(ctx, llm.ChatRequest{

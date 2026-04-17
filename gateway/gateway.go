@@ -43,10 +43,10 @@ func (g *Gateway) Run(ctx context.Context) error {
 		// Handle PDF document import
 		if msg.Document != nil && msg.Document.MimeType == "application/pdf" && g.pdfImport != nil {
 			typingCtx, stopTyping := context.WithCancel(ctx)
+			defer stopTyping()
 			go g.keepTyping(typingCtx, msg.ChatID)
 
 			result, err := g.pdfImport(ctx, msg.ChatID, msg.Document.FileName, msg.Document.Data)
-			stopTyping()
 
 			resp := channel.Response{ChatID: msg.ChatID}
 			if err != nil {
@@ -71,6 +71,7 @@ func (g *Gateway) Run(ctx context.Context) error {
 
 		// Start typing indicator
 		typingCtx, stopTyping := context.WithCancel(ctx)
+		defer stopTyping()
 		go g.keepTyping(typingCtx, msg.ChatID)
 
 		// Apply agent timeout if configured
@@ -78,14 +79,10 @@ func (g *Gateway) Run(ctx context.Context) error {
 		var agentCancel context.CancelFunc
 		if g.agentTimeout > 0 {
 			agentCtx, agentCancel = context.WithTimeout(ctx, g.agentTimeout)
+			defer agentCancel()
 		}
 
 		result, err := g.agent.HandleMessage(agentCtx, msg)
-
-		if agentCancel != nil {
-			agentCancel()
-		}
-		stopTyping()
 
 		resp := channel.Response{ChatID: msg.ChatID}
 

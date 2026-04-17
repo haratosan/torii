@@ -60,6 +60,7 @@ func (s *Store) migrate() error {
 			one_shot INTEGER DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
+		CREATE INDEX IF NOT EXISTS idx_tasks_next_run ON tasks(next_run);
 		CREATE TABLE IF NOT EXISTS user_memory (
 			user_id TEXT PRIMARY KEY,
 			notes TEXT DEFAULT '',

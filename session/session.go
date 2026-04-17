@@ -31,25 +31,15 @@ func NewStore(maxHistory int, db *store.Store, logger *slog.Logger) *Store {
 	}
 }
 
-func (s *Store) Get(chatID string) *Session {
-	s.mu.RLock()
-	sess, ok := s.sessions[chatID]
-	s.mu.RUnlock()
-	if ok && sess.loaded {
+// getOrLoadLocked returns the session for chatID, loading from DB on first
+// access. The caller MUST hold s.mu as a write lock.
+func (s *Store) getOrLoadLocked(chatID string) *Session {
+	if sess, ok := s.sessions[chatID]; ok && sess.loaded {
 		return sess
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sess := &Session{loaded: true}
 
-	// Double-check
-	if sess, ok = s.sessions[chatID]; ok && sess.loaded {
-		return sess
-	}
-
-	sess = &Session{loaded: true}
-
-	// Load from DB
 	if s.db != nil {
 		dbMsgs, err := s.db.LoadMessages(chatID, s.maxHistory)
 		if err != nil {
@@ -78,13 +68,12 @@ func (s *Store) Get(chatID string) *Session {
 }
 
 func (s *Store) Append(chatID string, msgs ...llm.ChatMessage) {
-	sess := s.Get(chatID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	sess := s.getOrLoadLocked(chatID)
 	sess.Messages = append(sess.Messages, msgs...)
 
-	// Persist to DB
 	if s.db != nil {
 		for _, msg := range msgs {
 			var toolCallsJSON string
@@ -99,10 +88,8 @@ func (s *Store) Append(chatID string, msgs ...llm.ChatMessage) {
 		}
 	}
 
-	// Trim to max history
 	if len(sess.Messages) > s.maxHistory {
 		sess.Messages = sess.Messages[len(sess.Messages)-s.maxHistory:]
-		// Trim DB too
 		if s.db != nil {
 			if err := s.db.TrimMessages(chatID, s.maxHistory); err != nil {
 				s.logger.Error("failed to trim db messages", "chat_id", chatID, "error", err)
@@ -128,9 +115,9 @@ func (s *Store) MaxHistory() int {
 }
 
 func (s *Store) History(chatID string) []llm.ChatMessage {
-	sess := s.Get(chatID)
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess := s.getOrLoadLocked(chatID)
 	result := make([]llm.ChatMessage, len(sess.Messages))
 	copy(result, sess.Messages)
 	return result
