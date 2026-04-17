@@ -6,14 +6,22 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/ollama/ollama/api"
 )
 
 type OllamaProvider struct {
-	client *api.Client
-	model  string
-	logger *slog.Logger
+	client      *api.Client
+	model       string
+	visionModel string
+	logger      *slog.Logger
+}
+
+// SetVisionModel configures a fallback model for requests that contain images
+// when the primary model does not support image input.
+func (o *OllamaProvider) SetVisionModel(model string) {
+	o.visionModel = model
 }
 
 func NewOllama(host, model string, logger *slog.Logger) (*OllamaProvider, error) {
@@ -121,7 +129,21 @@ func (o *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("ollama chat: %w", err)
+		// If the main model can't handle images, retry with the vision model
+		if o.visionModel != "" && strings.Contains(err.Error(), "does not support image") {
+			o.logger.Info("retrying with vision model", "model", o.visionModel)
+			chatReq.Model = o.visionModel
+			resp = nil
+			err = o.client.Chat(ctx, chatReq, func(cr api.ChatResponse) error {
+				resp = &cr
+				return nil
+			})
+			if err != nil {
+				return nil, fmt.Errorf("ollama chat (vision fallback): %w", err)
+			}
+		} else {
+			return nil, fmt.Errorf("ollama chat: %w", err)
+		}
 	}
 
 	result := &ChatResponse{

@@ -99,12 +99,18 @@ func main() {
 	var provider llm.Provider
 	switch cfg.LLM.Provider {
 	case "ollama":
-		provider, err = llm.NewOllama(cfg.LLM.Ollama.Host, cfg.LLM.Ollama.Model, logger)
-		if err != nil {
-			logger.Error("ollama provider error", "error", err)
+		ollamaProvider, ollamaErr := llm.NewOllama(cfg.LLM.Ollama.Host, cfg.LLM.Ollama.Model, logger)
+		if ollamaErr != nil {
+			logger.Error("ollama provider error", "error", ollamaErr)
 			os.Exit(1)
 		}
-		logger.Info("using ollama", "host", cfg.LLM.Ollama.Host, "model", cfg.LLM.Ollama.Model)
+		if vm := cfg.Knowledge.VisionModel; vm != "" {
+			ollamaProvider.SetVisionModel(vm)
+			logger.Info("using ollama", "host", cfg.LLM.Ollama.Host, "model", cfg.LLM.Ollama.Model, "vision_model", vm)
+		} else {
+			logger.Info("using ollama", "host", cfg.LLM.Ollama.Host, "model", cfg.LLM.Ollama.Model)
+		}
+		provider = ollamaProvider
 	case "openrouter":
 		if cfg.LLM.OpenRouter.APIKey == "" {
 			logger.Error("openrouter api key required (set TORII_OPENROUTER_API_KEY or config.yaml)")
