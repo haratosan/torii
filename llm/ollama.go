@@ -133,6 +133,7 @@ func (o *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		if o.visionModel != "" && strings.Contains(err.Error(), "does not support image") {
 			o.logger.Info("retrying with vision model", "model", o.visionModel)
 			chatReq.Model = o.visionModel
+			chatReq.Tools = nil // vision model should just describe the image, not call tools
 			resp = nil
 			err = o.client.Chat(ctx, chatReq, func(cr api.ChatResponse) error {
 				resp = &cr

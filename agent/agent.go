@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -132,15 +133,16 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 
 		// No tool calls → final answer (or retry if empty)
 		if len(resp.ToolCalls) == 0 {
-			if resp.Content == "" {
+			text := stripModelArtifacts(resp.Content)
+			if text == "" {
 				a.logger.Warn("empty response from model, retrying", "round", round)
 				continue
 			}
 			a.sessions.Append(msg.ChatID, llm.ChatMessage{
 				Role:    llm.RoleAssistant,
-				Content: resp.Content,
+				Content: text,
 			})
-			return &AgentResponse{Text: resp.Content, ImagePath: lastImagePath, Silent: silent, Buttons: lastButtons}, nil
+			return &AgentResponse{Text: text, ImagePath: lastImagePath, Silent: silent, Buttons: lastButtons}, nil
 		}
 
 		// Store assistant message with tool calls
@@ -372,6 +374,19 @@ func (a *Agent) buildToolDefs() []llm.ToolDef {
 	}
 
 	return tools
+}
+
+// stripModelArtifacts removes internal markers that reasoning models leak
+// into their output: <think> blocks, tool-call section markers, etc.
+var (
+	thinkRe    = regexp.MustCompile(`(?s)<think>.*?</think>\s*`)
+	toolTagsRe = regexp.MustCompile(`(?s)<\|tool_calls_section_begin\|>.*?<\|tool_calls_section_end\|>\s*`)
+)
+
+func stripModelArtifacts(s string) string {
+	s = thinkRe.ReplaceAllString(s, "")
+	s = toolTagsRe.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
 }
 
 // ToolDefsJSON returns tool definitions as JSON for debugging.
