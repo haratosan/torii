@@ -137,22 +137,34 @@ func (m *sandboxManager) containerName(chatID string) string {
 	return containerPrefix + chatID
 }
 
+// inspectContainer returns (exists, running) by inspecting the container
+// and parsing its state. Works with both Apple's container CLI (returns
+// "status":"running") and Docker (returns "Running":true in the State object).
+func (m *sandboxManager) inspectContainer(name string) (exists, running bool) {
+	out, err := exec.Command(m.containerBin, "inspect", name).CombinedOutput()
+	if err != nil {
+		// Docker returns a non-zero exit code for missing containers.
+		return false, false
+	}
+	s := string(out)
+	// Apple Container returns "[]" (valid JSON) for a missing container with
+	// exit code 0. Detect by looking for the container name in the payload.
+	if !strings.Contains(s, name) {
+		return false, false
+	}
+	lower := strings.ToLower(s)
+	if strings.Contains(lower, `"status":"running"`) || strings.Contains(lower, `"running":true`) {
+		return true, true
+	}
+	return true, false
+}
+
 func (m *sandboxManager) ensureRunning(chatID string) error {
 	name := m.containerName(chatID)
 
-	// Check if we already know it's running
-	if cs, ok := m.containers[chatID]; ok && cs.running {
-		// Verify it's actually still running
-		out, err := exec.Command(m.containerBin, "inspect", name).CombinedOutput()
-		if err == nil && strings.Contains(string(out), name) {
-			return nil
-		}
-		cs.running = false
-	}
+	exists, running := m.inspectContainer(name)
 
-	// Check if container exists but we don't know about it
-	out, err := exec.Command(m.containerBin, "inspect", name).CombinedOutput()
-	if err == nil && strings.Contains(string(out), name) {
+	if running {
 		if m.containers[chatID] == nil {
 			m.containers[chatID] = &containerState{}
 		}
@@ -160,8 +172,22 @@ func (m *sandboxManager) ensureRunning(chatID string) error {
 		return nil
 	}
 
-	// Remove stale container if it exists
-	exec.Command(m.containerBin, "rm", "-f", name).Run()
+	if exists {
+		// Container exists but is stopped. Try to start it in place before
+		// falling back to a full recreate.
+		m.logger.Info("resuming stopped sandbox container", "name", name)
+		if err := exec.Command(m.containerBin, "start", name).Run(); err == nil {
+			if _, running := m.inspectContainer(name); running {
+				if m.containers[chatID] == nil {
+					m.containers[chatID] = &containerState{}
+				}
+				m.containers[chatID].running = true
+				return nil
+			}
+		}
+		// Start failed or didn't flip state — remove and recreate fresh.
+		exec.Command(m.containerBin, "rm", "-f", name).Run()
+	}
 
 	// Create host directory for this chat
 	chatDir := filepath.Join(m.resolveSharedDir(), chatID)
