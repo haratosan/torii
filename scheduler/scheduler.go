@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -82,18 +83,14 @@ func (s *Scheduler) handleRemind(ctx context.Context, task *store.Task) {
 }
 
 func (s *Scheduler) handleCron(ctx context.Context, task *store.Task) {
-	// Process through agent using a temporary session to avoid filling the chat history
-	taskCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-
 	tmpChatID := fmt.Sprintf("cron:%d", task.ID)
 
-	result, err := s.agent.HandleMessage(taskCtx, channel.Message{
-		ChatID:     tmpChatID,
-		ToolChatID: task.ChatID,
-		UserID:     task.UserID,
-		Text:       task.Description,
-	})
+	result, err := s.runCron(ctx, task, tmpChatID)
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		s.logger.Warn("cron agent timed out, retrying once", "task_id", task.ID)
+		s.sessions.Clear(tmpChatID)
+		result, err = s.runCron(ctx, task, tmpChatID)
+	}
 
 	// Clean up temporary session
 	s.sessions.Clear(tmpChatID)
@@ -122,6 +119,21 @@ func (s *Scheduler) handleCron(ctx context.Context, task *store.Task) {
 		s.logger.Error("scheduler: update next run", "error", err, "task_id", task.ID)
 	}
 	s.logger.Info("cron task executed", "task_id", task.ID, "next_run", nextRun)
+}
+
+// runCron executes a cron task's agent call with a fresh 2-minute timeout.
+// Extracted so handleCron can retry on ctx-deadline errors without
+// duplicating the context/session bookkeeping.
+func (s *Scheduler) runCron(ctx context.Context, task *store.Task, tmpChatID string) (*agent.AgentResponse, error) {
+	taskCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	return s.agent.HandleMessage(taskCtx, channel.Message{
+		ChatID:     tmpChatID,
+		ToolChatID: task.ChatID,
+		UserID:     task.UserID,
+		Text:       task.Description,
+	})
 }
 
 func nextCronRun(schedule string, after time.Time) (time.Time, error) {
