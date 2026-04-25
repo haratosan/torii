@@ -95,6 +95,16 @@ func main() {
 		logger.Info("kb stats", "documents", docs, "chunks", chunks, "chats", chats)
 	}
 
+	// Auto-self-evolution bootstrap: ensure each active user has a daily
+	// system_evolve task. Idempotent — existing tasks are left alone.
+	if cfg.Skills.Enabled && cfg.Skills.AutoEvolve {
+		if err := scheduler.EnsureEvolutionTasks(db, cfg.Skills.EvolveSchedule, 30*24*time.Hour); err != nil {
+			logger.Warn("evolution bootstrap failed", "error", err)
+		} else {
+			logger.Info("evolution bootstrap done", "schedule", cfg.Skills.EvolveSchedule)
+		}
+	}
+
 	// Setup LLM provider (Ollama)
 	ollamaProvider, err := llm.NewOllama(cfg.LLM.Ollama.Host, cfg.LLM.Ollama.Model, logger)
 	if err != nil {
@@ -117,13 +127,16 @@ func main() {
 	}
 
 	// Register built-in tools
-	registry.RegisterBuiltin(builtin.NewMemoryTool(db))
+	registry.RegisterBuiltin(builtin.NewMemoryTool(db, cfg.Memory.MaxChars))
 	registry.RegisterBuiltin(builtin.NewBotProfileTool(db))
 	registry.RegisterBuiltin(builtin.NewShellTool(&cfg.Shell))
 	registry.RegisterBuiltin(builtin.NewRemindTool(db))
 	registry.RegisterBuiltin(builtin.NewCronTool(db))
 	registry.RegisterBuiltin(builtin.NewNoReplyTool())
 	registry.RegisterBuiltin(builtin.NewButtonsTool())
+	if cfg.Skills.Enabled {
+		registry.RegisterBuiltin(builtin.NewSkillsTool(db))
+	}
 
 	var ks *knowledge.KnowledgeStore
 	if cfg.Knowledge.Enabled {
@@ -172,7 +185,7 @@ func main() {
 	sessions := session.NewStore(cfg.Session.MaxHistory, db, logger)
 
 	// Setup agent
-	ag := agent.New(provider, executor, registry, sessions, db, cfg.Gateway.SystemPrompt, cfg.Gateway.MaxToolRounds, &cfg.Onboarding, "ollama", cfg.LLM.Ollama.Model, logger)
+	ag := agent.New(provider, executor, registry, sessions, db, cfg.Gateway.SystemPrompt, cfg.Gateway.MaxToolRounds, &cfg.Onboarding, "ollama", cfg.LLM.Ollama.Model, cfg.Skills.Enabled, cfg.Skills.MaxCharsInPrompt, logger)
 
 	// Setup MCP servers
 	if len(cfg.MCP.Servers) > 0 {

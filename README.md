@@ -11,11 +11,12 @@ An extensible AI assistant that connects to Telegram, powered by a local Ollama 
 - **Telegram integration** -- chat with your AI assistant via Telegram
 - **Local LLM** -- powered by Ollama
 - **Extension system** -- add custom tools as standalone executables
-- **Built-in tools** -- memory, bot profile, shell access, sandbox (containerized), reminders, cron jobs, inline keyboards, knowledge base, no-reply (silent response suppression)
+- **Built-in tools** -- memory (line-based, append/replace/remove), skills (durable playbooks), bot profile, shell access, sandbox (containerized), reminders, cron jobs, inline keyboards, knowledge base, no-reply (silent response suppression)
 - **MCP client** -- connect to any MCP server (stdio or SSE) to extend tool capabilities
 - **Scheduler** -- run reminders and cron tasks in the background
 - **Session persistence** -- per-user conversation history, survives restarts
 - **Knowledge base / RAG** -- per-chat semantic document search using Ollama embeddings, with automatic PDF import via vision OCR
+- **Auto self-evolution** -- daily background reflection job per user that turns recurring tool-call patterns into durable skills (read-only memory, fully silent)
 - **Bot commands** -- `/new`, `/status`, `/system`, `/help`
 - **Onboarding** -- configurable welcome questions for new users
 
@@ -124,6 +125,56 @@ mcp:
 
 MCP tools are discovered automatically at startup and integrated into the agent's tool system. Tool priority: builtins > extensions > MCP (name collisions are resolved by this order).
 
+## Memory & Skills
+
+Two complementary persistence layers that survive `/new` and Ollama model switches without bloating the system prompt.
+
+**Memory** — user-scoped, line-based notes (`builtin/memory.go`):
+- Actions: `add`, `replace` (substring match on `needle`), `remove` (substring), `list`, `get`, `delete`, and `set` (destructive — kept for backward compat).
+- Bounded by `memory.max_chars` (default 1500). When full, `add` is rejected with a consolidation hint instead of silently overwriting.
+- Auto-injected into the system prompt every turn as a bullet list.
+
+**Skills** — durable playbooks the LLM can write to itself (`builtin/skills.go`, `agent_skills` table):
+- Actions: `add`, `update`, `remove`, `list`, `get`. Default scope is `user:<id>`; pass `global=true` for cross-user skills.
+- Auto-injected into the system prompt up to `skills.max_chars_in_prompt` (default 4000). Surplus skills are listed by id+title and the LLM fetches on demand via `skills get <id>`.
+- Survives `/new` and Ollama model switches (it's just text in the prompt).
+
+```yaml
+memory:
+  max_chars: 1500
+skills:
+  enabled: true
+  max_chars_in_prompt: 4000
+```
+
+## Auto Self-Evolution
+
+A daily background job that scans each active user's recent tool-call patterns and turns them into skills automatically — no buttons, no approval, fully silent. Inspired by [Hermes Agent's self-evolution](https://github.com/NousResearch/hermes-agent-self-evolution) but radically simplified: no eval set, no genetic search; just a well-prompted reflection LLM with hard code-level safety rails.
+
+How it works:
+- One `system_evolve` task per active user, scheduled daily at 04:30 (configurable).
+- Each run builds a per-user trace summary (last 7 days: tool-call counts, failure rates, 3-5 representative interaction patterns) and feeds it back to the agent in a special evolution prompt.
+- The agent calls `skills add` / `skills update` based on what it sees and ends with `no-reply`.
+- Output is fully suppressed at the scheduler level — even if the LLM produces text, it never reaches Telegram.
+
+Safety rails (enforced in `extension/executor.go`, not just by the prompt):
+- Max 3 `skills add` and 1 `skills update` per run; `skills remove` forbidden.
+- Memory tool is **read-only** during the run (any `add`/`replace`/`remove`/`set`/`delete` is rejected).
+- Rate-limited to one successful run per ~23 hours per user.
+- Every run is audited in the `evolution_runs` SQLite table (status, summary JSON, leaked-text snippet if any).
+
+Inspect what the bot has been learning:
+```sh
+sqlite3 ~/.local/share/torii/torii.db \
+  "SELECT id, user_id, started_at, status, summary FROM evolution_runs ORDER BY id DESC LIMIT 10;"
+```
+
+```yaml
+skills:
+  auto_evolve: true                # daily background reflection (default on)
+  evolve_schedule: "30 4 * * *"    # cron expression
+```
+
 ## Inline Keyboards
 
 The LLM can present interactive buttons to users via the `send-buttons` built-in tool. When a user clicks a button, the callback data is routed back through the agent as a new message.
@@ -205,7 +256,7 @@ This creates a `release/` directory with the binary, config example, and all ext
 main.go          -- entrypoint
 agent/           -- agentic tool-calling loop
 cmd/             -- CLI subcommands (service management)
-builtin/         -- built-in tools (memory, shell, remind, cron, buttons, knowledge, ...)
+builtin/         -- built-in tools (memory, skills, shell, remind, cron, buttons, knowledge, ...)
 channel/         -- messaging channels (Telegram)
 config/          -- YAML config loading
 extension/       -- extension registry and executor
@@ -215,7 +266,7 @@ knowledge/       -- RAG: chunking, embedding, vector search
 pdf/             -- PDF-to-text via pdftoppm + vision OCR
 llm/             -- Ollama provider
 mcp/             -- MCP client (stdio/SSE) and server manager
-scheduler/       -- background task scheduler
+scheduler/       -- background task scheduler (incl. auto self-evolution loop)
 session/         -- per-user session/history management (DB-backed)
 store/           -- SQLite persistence layer
 ```

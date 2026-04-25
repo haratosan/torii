@@ -23,33 +23,37 @@ type MCPToolProvider interface {
 }
 
 type Agent struct {
-	provider      llm.Provider
-	executor      *extension.Executor
-	registry      *extension.Registry
-	sessions      *session.Store
-	store         *store.Store
-	systemPrompt  string
-	maxToolRounds int
-	onboarding    *config.OnboardingConfig
-	providerName  string
-	modelName     string
-	mcpTools      MCPToolProvider
-	logger        *slog.Logger
+	provider         llm.Provider
+	executor         *extension.Executor
+	registry         *extension.Registry
+	sessions         *session.Store
+	store            *store.Store
+	systemPrompt     string
+	maxToolRounds    int
+	onboarding       *config.OnboardingConfig
+	providerName     string
+	modelName        string
+	skillsEnabled    bool
+	skillsMaxChars   int
+	mcpTools         MCPToolProvider
+	logger           *slog.Logger
 }
 
-func New(provider llm.Provider, executor *extension.Executor, registry *extension.Registry, sessions *session.Store, db *store.Store, systemPrompt string, maxToolRounds int, onboarding *config.OnboardingConfig, providerName string, modelName string, logger *slog.Logger) *Agent {
+func New(provider llm.Provider, executor *extension.Executor, registry *extension.Registry, sessions *session.Store, db *store.Store, systemPrompt string, maxToolRounds int, onboarding *config.OnboardingConfig, providerName string, modelName string, skillsEnabled bool, skillsMaxChars int, logger *slog.Logger) *Agent {
 	return &Agent{
-		provider:      provider,
-		executor:      executor,
-		registry:      registry,
-		sessions:      sessions,
-		store:         db,
-		systemPrompt:  systemPrompt,
-		maxToolRounds: maxToolRounds,
-		onboarding:    onboarding,
-		providerName:  providerName,
-		modelName:     modelName,
-		logger:        logger,
+		provider:       provider,
+		executor:       executor,
+		registry:       registry,
+		sessions:       sessions,
+		store:          db,
+		systemPrompt:   systemPrompt,
+		maxToolRounds:  maxToolRounds,
+		onboarding:     onboarding,
+		providerName:   providerName,
+		modelName:      modelName,
+		skillsEnabled:  skillsEnabled,
+		skillsMaxChars: skillsMaxChars,
+		logger:         logger,
 	}
 }
 
@@ -97,7 +101,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 	}
 
 	// Append user message to history
-	a.sessions.Append(msg.ChatID, llm.ChatMessage{
+	a.sessions.Append(msg.ChatID, msg.UserID, llm.ChatMessage{
 		Role:    llm.RoleUser,
 		Content: content,
 		Images:  msg.Images,
@@ -142,7 +146,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 				a.logger.Warn("empty response from model, retrying", "round", round)
 				continue
 			}
-			a.sessions.Append(msg.ChatID, llm.ChatMessage{
+			a.sessions.Append(msg.ChatID, msg.UserID, llm.ChatMessage{
 				Role:    llm.RoleAssistant,
 				Content: text,
 			})
@@ -150,7 +154,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 		}
 
 		// Store assistant message with tool calls
-		a.sessions.Append(msg.ChatID, llm.ChatMessage{
+		a.sessions.Append(msg.ChatID, msg.UserID, llm.ChatMessage{
 			Role:      llm.RoleAssistant,
 			Content:   stripModelArtifacts(resp.Content),
 			ToolCalls: resp.ToolCalls,
@@ -164,7 +168,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 
 			if tc.Function.Name == "" {
 				a.logger.Warn("skipping tool call with empty name", "args", tc.Function.Arguments)
-				a.sessions.Append(msg.ChatID, llm.ChatMessage{
+				a.sessions.Append(msg.ChatID, msg.UserID, llm.ChatMessage{
 					Role:       llm.RoleTool,
 					Content:    "Error: tool call had an empty function name. Please retry with the correct function name.",
 					ToolCallID: tc.ID,
@@ -177,7 +181,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 			result, err := a.executor.Execute(ctx, tc.Function.Name, tc.Function.Arguments, toolChatID, msg.UserID, userImages)
 			if err != nil {
 				a.logger.Error("tool execution failed", "name", tc.Function.Name, "error", err)
-				a.sessions.Append(msg.ChatID, llm.ChatMessage{
+				a.sessions.Append(msg.ChatID, msg.UserID, llm.ChatMessage{
 					Role:       llm.RoleTool,
 					Content:    fmt.Sprintf("Error: %s", err),
 					ToolCallID: tc.ID,
@@ -207,7 +211,7 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 				}
 			}
 
-			a.sessions.Append(msg.ChatID, llm.ChatMessage{
+			a.sessions.Append(msg.ChatID, msg.UserID, llm.ChatMessage{
 				Role:       llm.RoleTool,
 				Content:    output,
 				ToolCallID: tc.ID,
@@ -322,23 +326,52 @@ func (a *Agent) buildSystemPrompt(userID string) string {
 		sb.WriteString("\n")
 	}
 
-	// User memory
-	notes, _ := a.store.GetMemory(userID)
-	if notes != "" {
-		sb.WriteString(fmt.Sprintf("\nUser notes: %s\n", notes))
+	// User memory (line-based — render as bullet list so the LLM sees it
+	// as discrete facts and treats `memory add` as the natural append op)
+	lines, _ := a.store.GetMemoryLines(userID)
+	if len(lines) > 0 {
+		sb.WriteString("\nUser notes:\n")
+		for _, l := range lines {
+			sb.WriteString("- ")
+			sb.WriteString(l)
+			sb.WriteString("\n")
+		}
+	}
+
+	// Skills (global + user-scoped). Injected every turn so they survive
+	// session resets and model switches.
+	if a.skillsEnabled {
+		scopes := []string{"global"}
+		if userID != "" {
+			scopes = append(scopes, "user:"+userID)
+		}
+		if skills, err := a.store.ListSkills(scopes); err == nil && len(skills) > 0 {
+			full, titlesOnly := renderSkills(skills, a.skillsMaxChars)
+			sb.WriteString("\n## Skills\n")
+			sb.WriteString(full)
+			if titlesOnly != "" {
+				sb.WriteString("\n(Additional skills available — call `skills get <id>`:\n")
+				sb.WriteString(titlesOnly)
+				sb.WriteString(")\n")
+			}
+		}
 	}
 
 	// Onboarding for new users
-	if a.onboarding != nil && a.onboarding.Enabled && notes == "" {
+	if a.onboarding != nil && a.onboarding.Enabled && len(lines) == 0 {
 		hasMemory, _ := a.store.HasMemory(userID)
 		if !hasMemory {
 			sb.WriteString("\nThis is a new user. Ask them the following to get to know them:\n")
 			for _, q := range a.onboarding.Questions {
 				sb.WriteString(fmt.Sprintf("- %s\n", q))
 			}
-			sb.WriteString("After they answer, save their information using the memory tool.\n")
+			sb.WriteString("After they answer, save their information using the memory tool (use `memory add` per fact).\n")
 		}
 	}
+
+	// Memory hygiene reminder — placed late so it stays adjacent to the
+	// timestamp the LLM tends to attend to most.
+	sb.WriteString("\nMemory hygiene: when asked to remember something, call `memory add` (never `memory set`). When you learn HOW the user wants a recurring task done, call `skills add`. Both survive /new and model switches.\n")
 
 	now := time.Now()
 	sb.WriteString(fmt.Sprintf(
@@ -349,6 +382,31 @@ func (a *Agent) buildSystemPrompt(userID string) string {
 	))
 
 	return sb.String()
+}
+
+// renderSkills greedily concatenates skill bodies into the prompt up to
+// maxChars, returning the rest as a `- #id [scope] title` index so the LLM
+// can fetch them on demand via `skills get <id>`. A single skill larger than
+// maxChars is included alone (we'd rather slightly bust the budget than
+// silently drop a learned procedure).
+func renderSkills(skills []store.Skill, maxChars int) (full, titlesOnly string) {
+	if maxChars <= 0 {
+		maxChars = 4000
+	}
+	var fullSb, titlesSb strings.Builder
+	used := 0
+	overflowing := false
+	for _, sk := range skills {
+		entry := fmt.Sprintf("### #%d [%s] %s\n%s\n\n", sk.ID, sk.Scope, sk.Title, sk.Body)
+		if !overflowing && (used == 0 || used+len(entry) <= maxChars) {
+			fullSb.WriteString(entry)
+			used += len(entry)
+			continue
+		}
+		overflowing = true
+		titlesSb.WriteString(fmt.Sprintf("- #%d [%s] %s\n", sk.ID, sk.Scope, sk.Title))
+	}
+	return fullSb.String(), titlesSb.String()
 }
 
 func (a *Agent) buildToolDefs() []llm.ToolDef {

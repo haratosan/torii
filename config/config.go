@@ -19,6 +19,19 @@ type Config struct {
 	Onboarding OnboardingConfig `yaml:"onboarding"`
 	MCP        MCPConfig        `yaml:"mcp"`
 	Knowledge  KnowledgeConfig  `yaml:"knowledge"`
+	Memory     MemoryConfig     `yaml:"memory"`
+	Skills     SkillsConfig     `yaml:"skills"`
+}
+
+type MemoryConfig struct {
+	MaxChars int `yaml:"max_chars"`
+}
+
+type SkillsConfig struct {
+	Enabled          bool   `yaml:"enabled"`
+	MaxCharsInPrompt int    `yaml:"max_chars_in_prompt"`
+	AutoEvolve       bool   `yaml:"auto_evolve"`
+	EvolveSchedule   string `yaml:"evolve_schedule"`
 }
 
 type MCPConfig struct {
@@ -203,6 +216,15 @@ Scheduling:
 			ChunkOverlap:   50,
 			TopK:           5,
 		},
+		Memory: MemoryConfig{
+			MaxChars: 1500,
+		},
+		Skills: SkillsConfig{
+			Enabled:          true,
+			MaxCharsInPrompt: 4000,
+			AutoEvolve:       true,
+			EvolveSchedule:   "30 4 * * *",
+		},
 	}
 
 	data, err := os.ReadFile(path)
@@ -213,6 +235,18 @@ Scheduling:
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, err
 		}
+	}
+
+	// Re-apply defaults that may have been zeroed out by a partial YAML block
+	// (e.g. user wrote `memory: {}` — Unmarshal zeroes MaxChars).
+	if cfg.Memory.MaxChars <= 0 {
+		cfg.Memory.MaxChars = 1500
+	}
+	if cfg.Skills.MaxCharsInPrompt <= 0 {
+		cfg.Skills.MaxCharsInPrompt = 4000
+	}
+	if cfg.Skills.EvolveSchedule == "" {
+		cfg.Skills.EvolveSchedule = "30 4 * * *"
 	}
 
 	// Env vars override YAML

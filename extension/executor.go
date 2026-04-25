@@ -42,6 +42,15 @@ func (e *Executor) SetMCPManager(m MCPExecutor) {
 }
 
 func (e *Executor) Execute(ctx context.Context, name string, input string, chatID string, userID string, images [][]byte) (*ExtResponse, error) {
+	// Self-evolution chokepoint: decrement quotas / reject forbidden writes
+	// before any handler runs. This applies to builtins, extensions, and MCP.
+	if lim, ok := EvolutionLimitsFromContext(ctx); ok {
+		if msg := evoGate(name, input, lim); msg != "" {
+			e.logger.Info("evolution gate denied call", "name", name, "reason", msg)
+			return &ExtResponse{Error: msg}, nil
+		}
+	}
+
 	// Check builtins first
 	if bt, ok := e.registry.GetBuiltin(name); ok {
 		req := ExtRequest{
@@ -128,6 +137,38 @@ func (e *Executor) Execute(ctx context.Context, name string, input string, chatI
 	}
 
 	return &resp, nil
+}
+
+// evoGate enforces self-evolution quotas. Returns "" if the call is allowed,
+// otherwise an error message that the caller surfaces as ExtResponse.Error.
+// The match is action-aware so unrelated actions (skills list/get,
+// memory get/list) pass through untouched.
+func evoGate(name, input string, lim *EvolutionLimits) string {
+	var a struct {
+		Action string `json:"action"`
+	}
+	_ = json.Unmarshal([]byte(input), &a)
+	switch name {
+	case "skills":
+		switch a.Action {
+		case "add":
+			if lim.addsLeft.Add(-1) < 0 {
+				return "evolution: skills add cap reached for this run"
+			}
+		case "update":
+			if lim.updatesLeft.Add(-1) < 0 {
+				return "evolution: skills update cap reached for this run"
+			}
+		case "remove":
+			return "evolution: skills remove forbidden in self-evolution mode"
+		}
+	case "memory":
+		switch a.Action {
+		case "add", "replace", "remove", "set", "delete":
+			return "evolution: memory writes forbidden — read-only mode"
+		}
+	}
+	return ""
 }
 
 func (e *Executor) executeCommand(ctx context.Context, ext *Extension, input string) (*ExtResponse, error) {

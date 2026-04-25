@@ -67,7 +67,10 @@ func (s *Store) getOrLoadLocked(chatID string) *Session {
 	return sess
 }
 
-func (s *Store) Append(chatID string, msgs ...llm.ChatMessage) {
+// Append persists messages for a (chatID, userID) pair. userID is recorded
+// alongside each row so trace tools can filter per-user across multiple chats
+// (and so per-user analyses work correctly in group chats).
+func (s *Store) Append(chatID, userID string, msgs ...llm.ChatMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -82,7 +85,7 @@ func (s *Store) Append(chatID string, msgs ...llm.ChatMessage) {
 					toolCallsJSON = string(b)
 				}
 			}
-			if err := s.db.SaveMessage(chatID, string(msg.Role), msg.Content, toolCallsJSON, msg.ToolCallID); err != nil {
+			if err := s.db.SaveMessage(chatID, userID, string(msg.Role), msg.Content, toolCallsJSON, msg.ToolCallID); err != nil {
 				s.logger.Error("failed to persist message", "chat_id", chatID, "error", err)
 			}
 		}

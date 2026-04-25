@@ -65,6 +65,8 @@ func (s *Scheduler) tick(ctx context.Context) {
 			s.handleRemind(ctx, task)
 		case "cron":
 			s.handleCron(ctx, task)
+		case "system_evolve":
+			s.handleEvolve(ctx, task)
 		}
 	}
 }
@@ -100,7 +102,7 @@ func (s *Scheduler) handleCron(ctx context.Context, task *store.Task) {
 		s.logger.Info("cron task silent, skipping send", "task_id", task.ID)
 	} else {
 		// Append only the final response to the real chat session so the user can reply
-		s.sessions.Append(task.ChatID, llm.ChatMessage{
+		s.sessions.Append(task.ChatID, task.UserID, llm.ChatMessage{
 			Role:    llm.RoleAssistant,
 			Content: result.Text,
 		})

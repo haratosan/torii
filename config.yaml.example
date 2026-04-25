@@ -85,3 +85,24 @@ knowledge:
   chunk_size: 500                       # tokens per chunk
   chunk_overlap: 50                     # overlap between chunks
   top_k: 5                             # default search results
+
+memory:
+  max_chars: 1500                      # bound on user-memory blob; new lines past
+                                       # this are rejected so the LLM is forced to
+                                       # consolidate (replace/remove) instead of
+                                       # silently bloating the context.
+
+skills:
+  enabled: true                        # persistent playbooks injected into the
+                                       # system prompt — survive /new and model
+                                       # switches. Disable to fall back to memory-only.
+  max_chars_in_prompt: 4000            # total budget for inlined skill bodies; any
+                                       # surplus is shown as a title-only index and
+                                       # the LLM fetches on demand via `skills get`.
+  auto_evolve: true                    # daily background self-reflection: scans the
+                                       # last 7 days of tool-call patterns per user
+                                       # and auto-creates skills (max 3 add + 1
+                                       # update per run). Memory is read-only during
+                                       # the run; output is fully suppressed.
+                                       # Audit in `evolution_runs` SQLite table.
+  evolve_schedule: "30 4 * * *"        # cron expression — default 04:30 daily.
