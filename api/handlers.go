@@ -23,6 +23,12 @@ import (
 // also can't see would just produce confusing errors.
 var alwaysAllowedAPITools = []string{"no-reply"}
 
+// maxChatCompletionsBody bounds the request body we will accept on the
+// OpenAI-compatible endpoint. The server is normally bound to 127.0.0.1
+// behind a reverse proxy, but enforcing a cap here means a misbehaving (or
+// hostile) client cannot drive the bot OOM with a multi-GB payload.
+const maxChatCompletionsBody = 1 << 20 // 1 MiB
+
 // handleModels returns a single-entry models list. OpenWebUI uses this to
 // populate its model picker; multiple variants (e.g. torii-fast, torii-full)
 // would be added here in a later phase.
@@ -58,21 +64,27 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxChatCompletionsBody)
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "could not read body: "+err.Error())
+		// MaxBytesReader surfaces "http: request body too large" as a normal
+		// read error; bucket both that and real I/O failures into 413 so the
+		// caller can tell payload-size from transport problems.
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "request body rejected: "+err.Error())
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(bodyBytes)) // restore so subsequent reads work
 
 	var req ChatCompletionRequest
 	if err := json.Unmarshal(bodyBytes, &req); err != nil {
-		s.logger.Info("api: bad JSON body", "user", apiUser.Name, "raw", truncateForLog(string(bodyBytes), 500))
+		// Body is not logged: it may contain user secrets pasted into the
+		// chat. The size + user is enough to triage a malformed client.
+		s.logger.Info("api: bad JSON body", "user", apiUser.Name, "bytes", len(bodyBytes))
 		writeJSONError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 	if len(req.Messages) == 0 {
-		s.logger.Info("api: empty messages array", "user", apiUser.Name, "raw", truncateForLog(string(bodyBytes), 500))
+		s.logger.Info("api: empty messages array", "user", apiUser.Name, "bytes", len(bodyBytes))
 		writeJSONError(w, http.StatusBadRequest, "messages array is required and non-empty")
 		return
 	}
@@ -192,11 +204,3 @@ func userIDForAPIUser(u *store.APIUser) string {
 	return fmt.Sprintf("api:%d", u.ID)
 }
 
-// truncateForLog clips long bodies so debug logs stay legible without
-// dumping huge payloads.
-func truncateForLog(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "…(truncated)"
-}

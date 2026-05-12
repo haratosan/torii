@@ -17,19 +17,36 @@ import (
 type Telegram struct {
 	token        string
 	allowedUsers []int64
+	allowAll     bool
 	transcribe   TranscribeFn
 	logger       *slog.Logger
 	handler      MessageHandler
 	bot          *bot.Bot
 }
 
-func NewTelegram(token string, allowedUsers []int64, transcribe TranscribeFn, logger *slog.Logger) *Telegram {
+func NewTelegram(token string, allowedUsers []int64, allowAll bool, transcribe TranscribeFn, logger *slog.Logger) *Telegram {
 	return &Telegram{
 		token:        token,
 		allowedUsers: allowedUsers,
+		allowAll:     allowAll,
 		transcribe:   transcribe,
 		logger:       logger,
 	}
+}
+
+// isAllowedUser is the single auth gate for Telegram callers. It is
+// fail-closed: an empty allowlist denies everyone unless allowAll is set
+// explicitly, so a forgotten config can't accidentally expose the bot.
+func (t *Telegram) isAllowedUser(userID int64) bool {
+	if t.allowAll {
+		return true
+	}
+	for _, id := range t.allowedUsers {
+		if id == userID {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *Telegram) Start(ctx context.Context, onMessage MessageHandler) error {
@@ -212,19 +229,9 @@ func (t *Telegram) handleUpdate(ctx context.Context, b *bot.Bot, update *models.
 	userID := update.Message.From.ID
 	chatID := update.Message.Chat.ID
 
-	// Check allowed users
-	if len(t.allowedUsers) > 0 {
-		allowed := false
-		for _, id := range t.allowedUsers {
-			if id == userID {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			t.logger.Warn("unauthorized user", "user_id", userID)
-			return
-		}
+	if !t.isAllowedUser(userID) {
+		t.logger.Warn("unauthorized user", "user_id", userID)
+		return
 	}
 
 	t.logger.Info("telegram message", "chat_id", chatID, "user_id", userID, "text", text)
@@ -258,19 +265,9 @@ func (t *Telegram) handleCallbackQuery(ctx context.Context, b *bot.Bot, cq *mode
 	userID := cq.From.ID
 	chatID := cq.Message.Message.Chat.ID
 
-	// Check allowed users
-	if len(t.allowedUsers) > 0 {
-		allowed := false
-		for _, id := range t.allowedUsers {
-			if id == userID {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			t.logger.Warn("unauthorized callback user", "user_id", userID)
-			return
-		}
+	if !t.isAllowedUser(userID) {
+		t.logger.Warn("unauthorized callback user", "user_id", userID)
+		return
 	}
 
 	text := cq.Data

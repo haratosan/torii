@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -28,6 +29,22 @@ import (
 	"github.com/haratosan/torii/session"
 	"github.com/haratosan/torii/store"
 )
+
+// redactURL strips userinfo (user:password@host) from a URL before it goes
+// into logs. Defensive: if the value isn't a parseable URL we return it
+// unchanged because a malformed-but-secret-free host (e.g. "localhost:11434"
+// without scheme) is still safe to log.
+func redactURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	u.User = url.User("REDACTED")
+	return u.String()
+}
 
 func main() {
 	// Handle service subcommands
@@ -114,9 +131,9 @@ func main() {
 	}
 	if vm := cfg.Knowledge.VisionModel; vm != "" {
 		ollamaProvider.SetVisionModel(vm)
-		logger.Info("using ollama", "host", cfg.LLM.Ollama.Host, "model", cfg.LLM.Ollama.Model, "vision_model", vm)
+		logger.Info("using ollama", "host", redactURL(cfg.LLM.Ollama.Host), "model", cfg.LLM.Ollama.Model, "vision_model", vm)
 	} else {
-		logger.Info("using ollama", "host", cfg.LLM.Ollama.Host, "model", cfg.LLM.Ollama.Model)
+		logger.Info("using ollama", "host", redactURL(cfg.LLM.Ollama.Host), "model", cfg.LLM.Ollama.Model)
 	}
 	var provider llm.Provider = ollamaProvider
 
@@ -216,6 +233,13 @@ func main() {
 		logger.Error("telegram token required (set TORII_TELEGRAM_TOKEN or config.yaml)")
 		os.Exit(1)
 	}
+	// Fail-closed allowlist: refuse to start a bot that anyone on Telegram
+	// could drive (and thus invoke shell/memory/skills tools). To run an open
+	// bot, set `telegram.allow_all: true` explicitly.
+	if !cfg.Telegram.AllowAll && len(cfg.Telegram.AllowedUsers) == 0 {
+		logger.Error("telegram.allowed_users is empty and telegram.allow_all is false — refusing to start an unauthenticated bot")
+		os.Exit(1)
+	}
 
 	var transcriber channel.TranscribeFn
 	if _, err := registry.Get("transcribe"); err == nil {
@@ -233,7 +257,7 @@ func main() {
 		logger.Info("voice transcription enabled")
 	}
 
-	ch := channel.NewTelegram(cfg.Telegram.Token, cfg.Telegram.AllowedUsers, transcriber, logger)
+	ch := channel.NewTelegram(cfg.Telegram.Token, cfg.Telegram.AllowedUsers, cfg.Telegram.AllowAll, transcriber, logger)
 
 	// Setup PDF import function
 	var pdfImportFn gateway.PDFImportFn

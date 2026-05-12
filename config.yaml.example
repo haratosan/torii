@@ -22,7 +22,14 @@ gateway:
 
 telegram:
   token: ""                    # or TORII_TELEGRAM_TOKEN env
-  allowed_users: []            # empty = all allowed
+  allowed_users: []            # Telegram user_ids permitted to drive the bot.
+                               # Default behavior is fail-closed: empty list +
+                               # allow_all:false will refuse to start. Add your
+                               # user_id here, or set allow_all:true below if
+                               # you really want a public bot.
+  allow_all: false             # Set true to disable the user allowlist entirely.
+                               # DANGEROUS — any Telegram user can then invoke
+                               # the shell, memory, and skills tools.
   admin_user_id: ""            # Telegram user_id (string) authorized to use the
                                # `api-admin` builtin to manage HTTP-API users.
                                # Empty = no admin = api-admin tool blocked entirely.

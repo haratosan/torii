@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Manifest struct {
@@ -13,9 +14,13 @@ type Manifest struct {
 	Description string         `json:"description"`
 	Version     string         `json:"version"`
 	Type        string         `json:"type"`    // "" (default/binary) or "command"
-	Command     string         `json:"command"` // Shell command with {{param}} placeholders
-	Parameters  map[string]any `json:"parameters"`
-	Env         []string       `json:"env"`
+	Command     string         `json:"command"` // Legacy: shell command with {{param}} placeholders. Prefer Argv.
+	// Argv is the preferred form for command-type extensions: each element
+	// becomes a separate argv slot, so {{param}} substitutions cannot leak
+	// into adjacent shell metacharacters (no `sh -c` involved).
+	Argv       []string       `json:"argv"`
+	Parameters map[string]any `json:"parameters"`
+	Env        []string       `json:"env"`
 }
 
 type ExtRequest struct {
@@ -95,20 +100,37 @@ func (r *Registry) Discover(dirs []string) error {
 				}
 				r.logger.Info("extension loaded", "name", manifest.Name, "type", "command")
 			} else {
-				// Look for executable with the directory name
+				// Look for executable with the directory name. Resolve
+				// symlinks and verify the result is still rooted under the
+				// extension directory — without this check, a symlinked
+				// entry could point at a binary anywhere on the filesystem.
 				execName := entry.Name()
 				execPath := filepath.Join(extDir, execName)
 				if _, err := os.Stat(execPath); err != nil {
 					r.logger.Warn("extension executable not found", "path", execPath)
 					continue
 				}
+				resolvedExec, err := filepath.EvalSymlinks(execPath)
+				if err != nil {
+					r.logger.Warn("extension executable: cannot resolve symlinks", "path", execPath, "error", err)
+					continue
+				}
+				resolvedDir, err := filepath.EvalSymlinks(extDir)
+				if err != nil {
+					r.logger.Warn("extension dir: cannot resolve symlinks", "dir", extDir, "error", err)
+					continue
+				}
+				if !strings.HasPrefix(resolvedExec, resolvedDir+string(filepath.Separator)) && resolvedExec != resolvedDir {
+					r.logger.Warn("extension executable escapes its directory — skipping", "path", execPath, "resolved", resolvedExec)
+					continue
+				}
 
 				r.extensions[manifest.Name] = &Extension{
 					Manifest:   manifest,
-					Executable: execPath,
+					Executable: resolvedExec,
 					Dir:        extDir,
 				}
-				r.logger.Info("extension loaded", "name", manifest.Name, "path", execPath)
+				r.logger.Info("extension loaded", "name", manifest.Name, "path", resolvedExec)
 			}
 		}
 	}

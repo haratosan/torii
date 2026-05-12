@@ -20,6 +20,7 @@ type Gateway struct {
 	agentTimeout  time.Duration
 	extensionDirs []string
 	pdfImport     PDFImportFn
+	limiter       *rateLimiter
 	logger        *slog.Logger
 }
 
@@ -30,6 +31,7 @@ func New(ch channel.Channel, ag *agent.Agent, agentTimeout time.Duration, extens
 		agentTimeout:  agentTimeout,
 		extensionDirs: extensionDirs,
 		pdfImport:     pdfImport,
+		limiter:       newRateLimiter(12, 5*time.Second),
 		logger:        logger,
 	}
 }
@@ -39,6 +41,15 @@ func (g *Gateway) Run(ctx context.Context) error {
 
 	return g.channel.Start(ctx, func(msg channel.Message) {
 		g.logger.Info("message received", "chat_id", msg.ChatID, "user_id", msg.UserID)
+
+		// Rate-limit per (chat, user). Telegram is already authenticated by
+		// the channel allowlist, so this only protects against a flood from
+		// an authorized account — typically a runaway script or a
+		// compromised session.
+		if g.limiter != nil && !g.limiter.allow(msg.ChatID+":"+msg.UserID) {
+			g.logger.Warn("rate-limit drop", "chat_id", msg.ChatID, "user_id", msg.UserID)
+			return
+		}
 
 		// Handle PDF document import
 		if msg.Document != nil && msg.Document.MimeType == "application/pdf" && g.pdfImport != nil {

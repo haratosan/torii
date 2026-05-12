@@ -61,3 +61,28 @@ func APIToolPolicyFromContext(ctx context.Context) (*APIToolPolicy, bool) {
 	p, ok := ctx.Value(apiPolicyKey{}).(*APIToolPolicy)
 	return p, ok
 }
+
+// CronExecution marks the active context as a cron-triggered agent run.
+// Cron task descriptions are written by the LLM itself at `cron create` time
+// and replayed as a fresh user message when the schedule fires — meaning a
+// successful prompt-injection during a normal chat could plant a persistent
+// daily instruction. To break that loop, the executor refuses high-blast
+// tools (shell/sandbox, memory & skills writes) whenever this marker is set.
+type CronExecution struct {
+	TaskID int64
+}
+
+type cronCtxKey struct{}
+
+// WithCronExecution decorates ctx for a scheduler-triggered agent run.
+func WithCronExecution(ctx context.Context, taskID int64) context.Context {
+	return context.WithValue(ctx, cronCtxKey{}, &CronExecution{TaskID: taskID})
+}
+
+// CronExecutionFromContext returns the marker if the run originated from the
+// scheduler. The gate uses the bool form; the struct fields are kept for log
+// correlation if a tool wants them later.
+func CronExecutionFromContext(ctx context.Context) (*CronExecution, bool) {
+	c, ok := ctx.Value(cronCtxKey{}).(*CronExecution)
+	return c, ok
+}

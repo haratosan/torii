@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -76,6 +77,12 @@ func (c *GatewayConfig) AgentTimeoutDuration() time.Duration {
 type TelegramConfig struct {
 	Token        string  `yaml:"token"`
 	AllowedUsers []int64 `yaml:"allowed_users"`
+	// AllowAll disables the user allowlist entirely. Default false: an empty
+	// AllowedUsers list now fails the bot's startup so a forgotten config
+	// can't accidentally expose tool calls (incl. shell) to every Telegram
+	// user. Set this explicitly to `true` only if you genuinely want a
+	// public bot.
+	AllowAll bool `yaml:"allow_all"`
 	// AdminUserID is the Telegram user_id (string form) authorized to use the
 	// `api-admin` tool. Empty disables the tool entirely. Stored as string to
 	// match how msg.UserID flows through the agent.
@@ -252,6 +259,19 @@ Scheduling:
 	if err == nil {
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return nil, err
+		}
+	}
+
+	// Permission warning: if the YAML file holds a token and is world- or
+	// group-readable, surface that on stderr. We don't auto-chmod — that
+	// would be surprising — but a warning is enough to push the user
+	// toward `chmod 600`.
+	if info, statErr := os.Stat(path); statErr == nil && cfg.Telegram.Token != "" {
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			fmt.Fprintf(os.Stderr,
+				"warning: %s contains telegram.token but has mode %o — run `chmod 600 %s` so other users on this host cannot read your bot token\n",
+				path, mode, path,
+			)
 		}
 	}
 
