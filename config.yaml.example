@@ -23,6 +23,9 @@ gateway:
 telegram:
   token: ""                    # or TORII_TELEGRAM_TOKEN env
   allowed_users: []            # empty = all allowed
+  admin_user_id: ""            # Telegram user_id (string) authorized to use the
+                               # `api-admin` builtin to manage HTTP-API users.
+                               # Empty = no admin = api-admin tool blocked entirely.
 
 llm:
   ollama:
@@ -106,3 +109,15 @@ skills:
                                        # the run; output is fully suppressed.
                                        # Audit in `evolution_runs` SQLite table.
   evolve_schedule: "30 4 * * *"        # cron expression — default 04:30 daily.
+
+api:
+  enabled: false                       # OpenAI-compatible HTTP server. Surfaces
+                                       # /v1/chat/completions and /v1/models. Tools
+                                       # run internally (clients see only final
+                                       # assistant text). Per-user bearer auth +
+                                       # tool allowlists managed via the api-admin
+                                       # builtin (Telegram-admin only).
+  listen: "127.0.0.1:8088"             # bind address. Use Tailscale Serve / Funnel
+                                       # for TLS+external reach — torii itself
+                                       # only listens locally.
+  model_label: "torii"                 # shown in /v1/models and response.model.

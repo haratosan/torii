@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/haratosan/torii/agent"
+	"github.com/haratosan/torii/api"
 	"github.com/haratosan/torii/builtin"
 	"github.com/haratosan/torii/channel"
 	"github.com/haratosan/torii/cmd"
@@ -136,6 +137,9 @@ func main() {
 	registry.RegisterBuiltin(builtin.NewButtonsTool())
 	if cfg.Skills.Enabled {
 		registry.RegisterBuiltin(builtin.NewSkillsTool(db))
+	}
+	if cfg.API.Enabled && cfg.Telegram.AdminUserID != "" {
+		registry.RegisterBuiltin(builtin.NewAPIAdminTool(db, cfg.Telegram.AdminUserID))
 	}
 
 	var ks *knowledge.KnowledgeStore
@@ -273,6 +277,17 @@ func main() {
 	// Start scheduler in background
 	sched := scheduler.New(db, ch, ag, sessions, cfg.Scheduler.IntervalDuration(), logger)
 	go sched.Run(ctx)
+
+	// Start OpenAI-compatible HTTP API in background (if enabled). Lives
+	// alongside Telegram — both share the same agent, registry, and DB.
+	if cfg.API.Enabled {
+		apiSrv := api.NewServer(ag, db, cfg.API, logger)
+		go func() {
+			if err := apiSrv.Run(ctx); err != nil {
+				logger.Error("api server", "error", err)
+			}
+		}()
+	}
 
 	if err := gw.Run(ctx); err != nil {
 		logger.Error("gateway error", "error", err)

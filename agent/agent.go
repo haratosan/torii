@@ -62,6 +62,16 @@ func (a *Agent) SetMCPToolProvider(p MCPToolProvider) {
 	a.mcpTools = p
 }
 
+// WithSessions returns a shallow copy of the agent that uses a different
+// session store. The HTTP API uses this to run with an in-memory ephemeral
+// session store (db == nil) so requests don't persist to the global
+// session_messages table — Telegram-style persistence stays untouched.
+func (a *Agent) WithSessions(s *session.Store) *Agent {
+	cp := *a
+	cp.sessions = s
+	return &cp
+}
+
 // AgentResponse contains the text reply and optional metadata from tool execution.
 type AgentResponse struct {
 	Text      string

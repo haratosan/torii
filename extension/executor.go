@@ -51,6 +51,18 @@ func (e *Executor) Execute(ctx context.Context, name string, input string, chatI
 		}
 	}
 
+	// API caller chokepoint: per-user tool allowlist (default deny). Only
+	// applied when the request originated from the HTTP API; Telegram-driven
+	// calls have no policy in ctx and pass through.
+	if pol, ok := APIToolPolicyFromContext(ctx); ok {
+		if !pol.Allowed[name] {
+			e.logger.Info("api policy denied tool call", "name", name, "user", userID)
+			return &ExtResponse{
+				Error: fmt.Sprintf("tool '%s' not permitted for this API user", name),
+			}, nil
+		}
+	}
+
 	// Check builtins first
 	if bt, ok := e.registry.GetBuiltin(name); ok {
 		req := ExtRequest{

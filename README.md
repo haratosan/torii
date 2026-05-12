@@ -17,6 +17,7 @@ An extensible AI assistant that connects to Telegram, powered by a local Ollama 
 - **Session persistence** -- per-user conversation history, survives restarts
 - **Knowledge base / RAG** -- per-chat semantic document search using Ollama embeddings, with automatic PDF import via vision OCR
 - **Auto self-evolution** -- daily background reflection job per user that turns recurring tool-call patterns into durable skills (read-only memory, fully silent)
+- **OpenAI-compatible API** -- `/v1/chat/completions` and `/v1/models` so OpenWebUI, curl, or the OpenAI SDK can drive the same agent (with tools, memory, skills) over Tailscale
 - **Bot commands** -- `/new`, `/status`, `/system`, `/help`
 - **Onboarding** -- configurable welcome questions for new users
 
@@ -175,6 +176,58 @@ skills:
   evolve_schedule: "30 4 * * *"    # cron expression
 ```
 
+## OpenAI-Compatible API
+
+Torii can expose its agent (with tools, memory, skills, and knowledge) as an OpenAI-compatible HTTP server, so any client that speaks `/v1/chat/completions` (OpenWebUI, curl, the official OpenAI SDK, …) can talk to it. Tools, memory consolidation, and skill injection happen **inside** torii — clients see only the final assistant message.
+
+**Architecture choices:**
+- Bound to `127.0.0.1:8088` by default. Tailscale Serve (or Funnel) handles TLS + reach. No TLS in torii itself.
+- Stateless: each request carries the full conversation. Nothing persists to `session_messages`.
+- Skills, memory, and user notes still persist (per-user) and are auto-injected into the system prompt — same as Telegram.
+- Per-user bearer-token auth + per-user tool allowlist (default deny).
+
+```yaml
+api:
+  enabled: true
+  listen: "127.0.0.1:8088"
+  model_label: "torii"
+
+telegram:
+  admin_user_id: "523111104"   # required to use the api-admin builtin
+```
+
+### Managing API users (via Telegram, as admin)
+
+The Telegram admin uses the `api-admin` builtin to manage everything in natural language:
+
+> "Erstelle einen API-User namens 'webui' und gib ihm Zugriff auf memory, skills, knowledge und web_search. Link ihn auf meinen Telegram-Account."
+
+The bot will run `api-admin create`, `api-admin grant ...`, `api-admin link ...` and surface the bearer token **once** in chat (store it immediately — it cannot be retrieved later). Other admin actions: `list`, `disable`, `enable`, `rotate`, `revoke`, `delete`.
+
+If an API user is **linked** to a Telegram user, they share memory and skills — the agent treats them as the same person. **Unlinked** API users get an isolated `api:<id>` scope.
+
+### Tailscale setup
+
+Bind locally, let Tailscale handle TLS:
+
+```sh
+# tailnet-only:
+tailscale serve --bg --https=443 http://127.0.0.1:8088
+# or public via Funnel:
+tailscale funnel --bg --https=443 http://127.0.0.1:8088
+```
+
+Endpoint becomes `https://<machine>.<tailnet>.ts.net`.
+
+### Curl smoke test
+
+```sh
+curl -s https://<machine>.<tailnet>.ts.net/v1/chat/completions \
+  -H "Authorization: Bearer torii_<token>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"torii","messages":[{"role":"user","content":"What do you remember about me?"}],"stream":false}'
+```
+
 ## Inline Keyboards
 
 The LLM can present interactive buttons to users via the `send-buttons` built-in tool. When a user clicks a button, the callback data is routed back through the agent as a new message.
@@ -255,8 +308,9 @@ This creates a `release/` directory with the binary, config example, and all ext
 ```
 main.go          -- entrypoint
 agent/           -- agentic tool-calling loop
+api/             -- OpenAI-compatible HTTP server (Bearer auth, per-user tool allowlists)
 cmd/             -- CLI subcommands (service management)
-builtin/         -- built-in tools (memory, skills, shell, remind, cron, buttons, knowledge, ...)
+builtin/         -- built-in tools (memory, skills, shell, remind, cron, buttons, knowledge, api-admin, ...)
 channel/         -- messaging channels (Telegram)
 config/          -- YAML config loading
 extension/       -- extension registry and executor

@@ -126,6 +126,25 @@ func (s *Store) migrate() error {
 			status TEXT DEFAULT 'running'
 		);
 		CREATE INDEX IF NOT EXISTS idx_evo_user_started ON evolution_runs(user_id, started_at DESC);
+
+		CREATE TABLE IF NOT EXISTS api_users (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE,
+			bearer_token TEXT NOT NULL UNIQUE,
+			linked_telegram_user_id TEXT DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_api_users_token ON api_users(bearer_token);
+		CREATE INDEX IF NOT EXISTS idx_api_users_linked ON api_users(linked_telegram_user_id);
+
+		CREATE TABLE IF NOT EXISTS api_user_tools (
+			api_user_id INTEGER NOT NULL,
+			tool_name TEXT NOT NULL,
+			PRIMARY KEY (api_user_id, tool_name),
+			FOREIGN KEY (api_user_id) REFERENCES api_users(id) ON DELETE CASCADE
+		);
 	`)
 	if err != nil {
 		return err
@@ -962,6 +981,188 @@ func (s *Store) FinishEvolutionRun(id int64, status, summary string) error {
 		status, summary, id,
 	)
 	return err
+}
+
+// --- API Users ---
+
+type APIUser struct {
+	ID                   int64
+	Name                 string
+	BearerToken          string
+	LinkedTelegramUserID string
+	Enabled              bool
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+func scanAPIUser(row interface {
+	Scan(dest ...any) error
+}) (*APIUser, error) {
+	var u APIUser
+	var enabled int
+	var created, updated string
+	if err := row.Scan(&u.ID, &u.Name, &u.BearerToken, &u.LinkedTelegramUserID, &enabled, &created, &updated); err != nil {
+		return nil, err
+	}
+	u.Enabled = enabled == 1
+	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+	u.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updated)
+	return &u, nil
+}
+
+// CreateAPIUser inserts a row with a freshly generated token.
+func (s *Store) CreateAPIUser(name, bearerToken string) (*APIUser, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO api_users (name, bearer_token) VALUES (?, ?)`,
+		name, bearerToken,
+	)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return s.GetAPIUserByID(id)
+}
+
+// GetAPIUserByToken does the auth lookup; returns (nil, nil) if no row matched
+// so callers can distinguish "no such token" from "DB error".
+func (s *Store) GetAPIUserByToken(token string) (*APIUser, error) {
+	row := s.db.QueryRow(
+		`SELECT id, name, bearer_token, COALESCE(linked_telegram_user_id, ''), enabled, created_at, updated_at
+		   FROM api_users WHERE bearer_token = ?`,
+		token,
+	)
+	u, err := scanAPIUser(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return u, err
+}
+
+// GetAPIUserByID fetches by primary key. Returns (nil, nil) if missing.
+func (s *Store) GetAPIUserByID(id int64) (*APIUser, error) {
+	row := s.db.QueryRow(
+		`SELECT id, name, bearer_token, COALESCE(linked_telegram_user_id, ''), enabled, created_at, updated_at
+		   FROM api_users WHERE id = ?`,
+		id,
+	)
+	u, err := scanAPIUser(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return u, err
+}
+
+// GetAPIUserByName fetches by unique name. Returns (nil, nil) if missing.
+func (s *Store) GetAPIUserByName(name string) (*APIUser, error) {
+	row := s.db.QueryRow(
+		`SELECT id, name, bearer_token, COALESCE(linked_telegram_user_id, ''), enabled, created_at, updated_at
+		   FROM api_users WHERE name = ?`,
+		name,
+	)
+	u, err := scanAPIUser(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return u, err
+}
+
+// ListAPIUsers returns all api users ordered by id.
+func (s *Store) ListAPIUsers() ([]APIUser, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, bearer_token, COALESCE(linked_telegram_user_id, ''), enabled, created_at, updated_at
+		   FROM api_users ORDER BY id`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []APIUser
+	for rows.Next() {
+		u, err := scanAPIUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *u)
+	}
+	return out, rows.Err()
+}
+
+// UpdateAPIUserLinkedTelegram sets (or clears with "") the telegram link.
+func (s *Store) UpdateAPIUserLinkedTelegram(id int64, telegramUserID string) error {
+	_, err := s.db.Exec(
+		`UPDATE api_users SET linked_telegram_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		telegramUserID, id,
+	)
+	return err
+}
+
+// SetAPIUserEnabled flips the enabled flag. Disabled users get 401 on auth.
+func (s *Store) SetAPIUserEnabled(id int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := s.db.Exec(
+		`UPDATE api_users SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		v, id,
+	)
+	return err
+}
+
+// RotateAPIToken replaces the bearer token in place. Caller is expected to
+// generate the new token (so the secret material never leaves their function).
+func (s *Store) RotateAPIToken(id int64, newToken string) error {
+	_, err := s.db.Exec(
+		`UPDATE api_users SET bearer_token = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		newToken, id,
+	)
+	return err
+}
+
+// DeleteAPIUser removes the row; CASCADE clears api_user_tools.
+func (s *Store) DeleteAPIUser(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM api_users WHERE id = ?`, id)
+	return err
+}
+
+// GrantAPITool adds a tool to the user's allowlist. Idempotent thanks to
+// PRIMARY KEY (api_user_id, tool_name) — duplicate inserts are no-ops via
+// ON CONFLICT DO NOTHING.
+func (s *Store) GrantAPITool(apiUserID int64, toolName string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO api_user_tools (api_user_id, tool_name) VALUES (?, ?) ON CONFLICT DO NOTHING`,
+		apiUserID, toolName,
+	)
+	return err
+}
+
+func (s *Store) RevokeAPITool(apiUserID int64, toolName string) error {
+	_, err := s.db.Exec(
+		`DELETE FROM api_user_tools WHERE api_user_id = ? AND tool_name = ?`,
+		apiUserID, toolName,
+	)
+	return err
+}
+
+// GetAPIUserTools returns the granted tool names for a user.
+func (s *Store) GetAPIUserTools(apiUserID int64) ([]string, error) {
+	rows, err := s.db.Query(
+		`SELECT tool_name FROM api_user_tools WHERE api_user_id = ? ORDER BY tool_name`,
+		apiUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // LastEvolutionRun returns the most recent evolution run for userID, or nil

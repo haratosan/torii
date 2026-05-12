@@ -39,3 +39,25 @@ func (l *EvolutionLimits) AddsRemaining() int32 { return l.addsLeft.Load() }
 
 // UpdatesRemaining reports the current value.
 func (l *EvolutionLimits) UpdatesRemaining() int32 { return l.updatesLeft.Load() }
+
+// APIToolPolicy is the per-API-user tool allowlist. Default-deny: only tools
+// whose name is mapped to true are callable. The HTTP layer constructs this
+// once per request and decorates ctx so the executor can enforce centrally.
+type APIToolPolicy struct {
+	Allowed map[string]bool
+}
+
+type apiPolicyKey struct{}
+
+// WithAPIToolPolicy decorates ctx with the calling API user's tool allowlist.
+// Tools not in the map are rejected by the executor with a clear error so the
+// agent can surface the limitation back to the user.
+func WithAPIToolPolicy(ctx context.Context, p *APIToolPolicy) context.Context {
+	return context.WithValue(ctx, apiPolicyKey{}, p)
+}
+
+// APIToolPolicyFromContext returns the active policy if present.
+func APIToolPolicyFromContext(ctx context.Context) (*APIToolPolicy, bool) {
+	p, ok := ctx.Value(apiPolicyKey{}).(*APIToolPolicy)
+	return p, ok
+}

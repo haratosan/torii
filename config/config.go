@@ -21,6 +21,15 @@ type Config struct {
 	Knowledge  KnowledgeConfig  `yaml:"knowledge"`
 	Memory     MemoryConfig     `yaml:"memory"`
 	Skills     SkillsConfig     `yaml:"skills"`
+	API        APIConfig        `yaml:"api"`
+}
+
+// APIConfig controls the OpenAI-compatible HTTP API server. Disabled by default;
+// enable explicitly and bind to 127.0.0.1 — Tailscale Serve handles TLS+reach.
+type APIConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	Listen     string `yaml:"listen"`
+	ModelLabel string `yaml:"model_label"` // shown in /v1/models and response.model
 }
 
 type MemoryConfig struct {
@@ -67,6 +76,10 @@ func (c *GatewayConfig) AgentTimeoutDuration() time.Duration {
 type TelegramConfig struct {
 	Token        string  `yaml:"token"`
 	AllowedUsers []int64 `yaml:"allowed_users"`
+	// AdminUserID is the Telegram user_id (string form) authorized to use the
+	// `api-admin` tool. Empty disables the tool entirely. Stored as string to
+	// match how msg.UserID flows through the agent.
+	AdminUserID string `yaml:"admin_user_id"`
 }
 
 type LLMConfig struct {
@@ -225,6 +238,11 @@ Scheduling:
 			AutoEvolve:       true,
 			EvolveSchedule:   "30 4 * * *",
 		},
+		API: APIConfig{
+			Enabled:    false,
+			Listen:     "127.0.0.1:8088",
+			ModelLabel: "torii",
+		},
 	}
 
 	data, err := os.ReadFile(path)
@@ -247,6 +265,12 @@ Scheduling:
 	}
 	if cfg.Skills.EvolveSchedule == "" {
 		cfg.Skills.EvolveSchedule = "30 4 * * *"
+	}
+	if cfg.API.Listen == "" {
+		cfg.API.Listen = "127.0.0.1:8088"
+	}
+	if cfg.API.ModelLabel == "" {
+		cfg.API.ModelLabel = "torii"
 	}
 
 	// Env vars override YAML
