@@ -24,6 +24,7 @@ import (
 	"github.com/haratosan/torii/knowledge"
 	"github.com/haratosan/torii/llm"
 	"github.com/haratosan/torii/mcp"
+	"github.com/haratosan/torii/mqtt"
 	"github.com/haratosan/torii/pdf"
 	"github.com/haratosan/torii/scheduler"
 	"github.com/haratosan/torii/session"
@@ -259,6 +260,16 @@ func main() {
 
 	ch := channel.NewTelegram(cfg.Telegram.Token, cfg.Telegram.AllowedUsers, cfg.Telegram.AllowAll, transcriber, logger)
 
+	// MQTT subscriber for user-defined triggers. Distinct from the torii-mqtt
+	// pull tool: this holds a persistent broker connection and re-enters the
+	// agent loop on each matching message. Registered late so it can wire the
+	// agent + channel into the mqtt_trigger builtin's dependencies.
+	var mqttSub *mqtt.Subscriber
+	if cfg.MQTT.Enabled {
+		mqttSub = mqtt.New(cfg.MQTT, db, ag, ch, logger)
+		registry.RegisterBuiltin(builtin.NewMQTTTriggerTool(db, mqttSub))
+	}
+
 	// Setup PDF import function
 	var pdfImportFn gateway.PDFImportFn
 	if ks != nil && cfg.Knowledge.VisionModel != "" {
@@ -301,6 +312,17 @@ func main() {
 	// Start scheduler in background
 	sched := scheduler.New(db, ch, ag, sessions, cfg.Scheduler.IntervalDuration(), logger)
 	go sched.Run(ctx)
+
+	// Start MQTT subscriber in background (if enabled). On every (re)connect
+	// it loads enabled triggers from the DB and resubscribes; new triggers
+	// added via the mqtt_trigger builtin subscribe live.
+	if mqttSub != nil {
+		go func() {
+			if err := mqttSub.Run(ctx); err != nil {
+				logger.Error("mqtt subscriber", "error", err)
+			}
+		}()
+	}
 
 	// Start OpenAI-compatible HTTP API in background (if enabled). Lives
 	// alongside Telegram — both share the same agent, registry, and DB.

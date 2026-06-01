@@ -26,6 +26,22 @@ type Task struct {
 	CreatedAt   time.Time
 }
 
+// MQTTTrigger is a user-defined MQTT subscription that, when matched, re-enters
+// the agent loop in the chat that created it. Persisted so triggers survive a
+// torii restart; the subscriber resubscribes on connect.
+type MQTTTrigger struct {
+	ID        int64
+	Name      string
+	Topic     string
+	Match     string // optional substring filter on payload
+	ChatID    string
+	UserID    string
+	Prompt    string
+	Silent    bool
+	Enabled   bool
+	CreatedAt time.Time
+}
+
 type Store struct {
 	db *sql.DB
 }
@@ -145,6 +161,21 @@ func (s *Store) migrate() error {
 			PRIMARY KEY (api_user_id, tool_name),
 			FOREIGN KEY (api_user_id) REFERENCES api_users(id) ON DELETE CASCADE
 		);
+
+		CREATE TABLE IF NOT EXISTS mqtt_triggers (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			topic TEXT NOT NULL,
+			match TEXT NOT NULL DEFAULT '',
+			chat_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			prompt TEXT NOT NULL,
+			silent INTEGER NOT NULL DEFAULT 0,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(user_id, name)
+		);
+		CREATE INDEX IF NOT EXISTS idx_mqtt_triggers_enabled ON mqtt_triggers(enabled);
 	`)
 	if err != nil {
 		return err
@@ -263,6 +294,111 @@ func scanTasks(rows *sql.Rows) ([]*Task, error) {
 		tasks = append(tasks, t)
 	}
 	return tasks, rows.Err()
+}
+
+// --- MQTT Triggers ---
+
+func (s *Store) MQTTTriggerCreate(t *MQTTTrigger) (int64, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO mqtt_triggers (name, topic, match, chat_id, user_id, prompt, silent, enabled)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.Name, t.Topic, t.Match, t.ChatID, t.UserID, t.Prompt, boolToInt(t.Silent), boolToInt(t.Enabled),
+	)
+	if err != nil {
+		return 0, err
+	}
+	id, _ := res.LastInsertId()
+	t.ID = id
+	return id, nil
+}
+
+func (s *Store) MQTTTriggerGet(id int64) (*MQTTTrigger, error) {
+	row := s.db.QueryRow(
+		`SELECT id, name, topic, match, chat_id, user_id, prompt, silent, enabled, created_at
+		 FROM mqtt_triggers WHERE id = ?`, id,
+	)
+	t, err := scanMQTTTrigger(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return t, err
+}
+
+func (s *Store) MQTTTriggerListByUser(userID string) ([]*MQTTTrigger, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, topic, match, chat_id, user_id, prompt, silent, enabled, created_at
+		 FROM mqtt_triggers WHERE user_id = ? ORDER BY id`, userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMQTTTriggerRows(rows)
+}
+
+func (s *Store) MQTTTriggerListEnabled() ([]*MQTTTrigger, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, topic, match, chat_id, user_id, prompt, silent, enabled, created_at
+		 FROM mqtt_triggers WHERE enabled = 1 ORDER BY id`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMQTTTriggerRows(rows)
+}
+
+// MQTTTriggerDeleteByUser scopes the delete to the caller so one user can't
+// remove another user's trigger.
+func (s *Store) MQTTTriggerDeleteByUser(id int64, userID string) (bool, error) {
+	res, err := s.db.Exec(`DELETE FROM mqtt_triggers WHERE id = ? AND user_id = ?`, id, userID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+func (s *Store) MQTTTriggerSetEnabledByUser(id int64, userID string, enabled bool) (bool, error) {
+	res, err := s.db.Exec(
+		`UPDATE mqtt_triggers SET enabled = ? WHERE id = ? AND user_id = ?`,
+		boolToInt(enabled), id, userID,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+func scanMQTTTrigger(row *sql.Row) (*MQTTTrigger, error) {
+	t := &MQTTTrigger{}
+	var silent, enabled int
+	var createdAt string
+	if err := row.Scan(&t.ID, &t.Name, &t.Topic, &t.Match, &t.ChatID, &t.UserID, &t.Prompt, &silent, &enabled, &createdAt); err != nil {
+		return nil, err
+	}
+	t.Silent = silent == 1
+	t.Enabled = enabled == 1
+	t.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+	return t, nil
+}
+
+func scanMQTTTriggerRows(rows *sql.Rows) ([]*MQTTTrigger, error) {
+	var out []*MQTTTrigger
+	for rows.Next() {
+		t := &MQTTTrigger{}
+		var silent, enabled int
+		var createdAt string
+		if err := rows.Scan(&t.ID, &t.Name, &t.Topic, &t.Match, &t.ChatID, &t.UserID, &t.Prompt, &silent, &enabled, &createdAt); err != nil {
+			return nil, err
+		}
+		t.Silent = silent == 1
+		t.Enabled = enabled == 1
+		t.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAt)
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // --- User Memory ---

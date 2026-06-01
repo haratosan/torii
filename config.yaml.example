@@ -128,3 +128,20 @@ api:
                                        # for TLS+external reach — torii itself
                                        # only listens locally.
   model_label: "torii"                 # shown in /v1/models and response.model.
+
+mqtt:
+  enabled: false                       # Persistent in-process MQTT subscriber for
+                                       # user-defined event triggers (e.g. notify
+                                       # me when the Nuki door is unlocked). Distinct
+                                       # from the torii-mqtt extension, which is a
+                                       # pull-style tool the model calls on demand.
+                                       # Triggers are created at runtime via the
+                                       # `mqtt_trigger` builtin tool and persist in
+                                       # the SQLite DB.
+  # broker, username and password fall back to extensions.env TORII_MQTT_BROKER_URL /
+  # TORII_MQTT_USERNAME / TORII_MQTT_PASSWORD if not set here, so the torii-mqtt
+  # extension's broker config is reused. Explicit values here win.
+  # broker: "tcp://hivemq.local:1883"    # ssl://host:8883 for HiveMQ Cloud
+  # username: "torii-bot"
+  # password: "..."
+  client_id: "torii-subscriber"        # default; override if you run multiple instances

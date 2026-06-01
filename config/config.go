@@ -23,6 +23,19 @@ type Config struct {
 	Memory     MemoryConfig     `yaml:"memory"`
 	Skills     SkillsConfig     `yaml:"skills"`
 	API        APIConfig        `yaml:"api"`
+	MQTT       MQTTConfig       `yaml:"mqtt"`
+}
+
+// MQTTConfig controls the persistent in-process MQTT subscriber that drives
+// user-defined triggers (e.g. Nuki door-unlock events). Broker, username and
+// password fall back to the values the torii-mqtt extension already uses
+// under extensions.env, so a single broker config covers both consumers.
+type MQTTConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Broker   string `yaml:"broker"`    // "tcp://host:1883" or "ssl://host:8883"
+	ClientID string `yaml:"client_id"` // default "torii-subscriber"
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 }
 
 // APIConfig controls the OpenAI-compatible HTTP API server. Disabled by default;
@@ -250,6 +263,10 @@ Scheduling:
 			Listen:     "127.0.0.1:8088",
 			ModelLabel: "torii",
 		},
+		MQTT: MQTTConfig{
+			Enabled:  false,
+			ClientID: "torii-subscriber",
+		},
 	}
 
 	data, err := os.ReadFile(path)
@@ -305,6 +322,31 @@ Scheduling:
 	}
 	if v := os.Getenv("TORII_LOG_LEVEL"); v != "" {
 		cfg.Gateway.LogLevel = v
+	}
+	if v := os.Getenv("TORII_MQTT_BROKER_URL"); v != "" {
+		cfg.MQTT.Broker = v
+	}
+	if v := os.Getenv("TORII_MQTT_USERNAME"); v != "" {
+		cfg.MQTT.Username = v
+	}
+	if v := os.Getenv("TORII_MQTT_PASSWORD"); v != "" {
+		cfg.MQTT.Password = v
+	}
+
+	// Final fallback: reuse the broker creds the torii-mqtt extension already
+	// reads from extensions.env so Fabian only configures the broker once.
+	// Explicit mqtt.* values or top-level env overrides above still win.
+	if cfg.MQTT.Broker == "" {
+		cfg.MQTT.Broker = cfg.Extensions.Env["TORII_MQTT_BROKER_URL"]
+	}
+	if cfg.MQTT.Username == "" {
+		cfg.MQTT.Username = cfg.Extensions.Env["TORII_MQTT_USERNAME"]
+	}
+	if cfg.MQTT.Password == "" {
+		cfg.MQTT.Password = cfg.Extensions.Env["TORII_MQTT_PASSWORD"]
+	}
+	if cfg.MQTT.ClientID == "" {
+		cfg.MQTT.ClientID = "torii-subscriber"
 	}
 
 	return cfg, nil
