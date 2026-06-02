@@ -152,6 +152,19 @@ func (s *Subscriber) Register(t *store.MQTTTrigger) error {
 	return nil
 }
 
+// Resubscribe swaps an existing trigger's subscription to a new topic. Called
+// by the builtin after an update that changed the topic. If oldTopic equals
+// newTopic, this is a no-op.
+func (s *Subscriber) Resubscribe(t *store.MQTTTrigger, oldTopic string) error {
+	if oldTopic == t.Topic {
+		return nil
+	}
+	if err := s.Unregister(t.ID); err != nil {
+		s.logger.Warn("mqtt resubscribe: unregister old", "topic", oldTopic, "error", err)
+	}
+	return s.Register(t)
+}
+
 // Unregister unsubscribes a trigger after it was deleted or disabled.
 func (s *Subscriber) Unregister(triggerID int64) error {
 	s.mu.Lock()

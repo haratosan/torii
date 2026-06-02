@@ -359,6 +359,41 @@ func (s *Store) MQTTTriggerDeleteByUser(id int64, userID string) (bool, error) {
 	return n > 0, nil
 }
 
+// MQTTTriggerUpdateByUser updates the subset of fields that are non-nil. Returns
+// (oldTopic, newTrigger, true, nil) on success so the caller (subscriber) can
+// re-subscribe if the topic changed. Returns (_, nil, false, nil) when the row
+// doesn't belong to the caller or doesn't exist.
+func (s *Store) MQTTTriggerUpdateByUser(id int64, userID string, topic, match, prompt *string, silent *bool) (string, *MQTTTrigger, bool, error) {
+	existing, err := s.MQTTTriggerGet(id)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if existing == nil || existing.UserID != userID {
+		return "", nil, false, nil
+	}
+	oldTopic := existing.Topic
+	if topic != nil {
+		existing.Topic = *topic
+	}
+	if match != nil {
+		existing.Match = *match
+	}
+	if prompt != nil {
+		existing.Prompt = *prompt
+	}
+	if silent != nil {
+		existing.Silent = *silent
+	}
+	_, err = s.db.Exec(
+		`UPDATE mqtt_triggers SET topic = ?, match = ?, prompt = ?, silent = ? WHERE id = ? AND user_id = ?`,
+		existing.Topic, existing.Match, existing.Prompt, boolToInt(existing.Silent), id, userID,
+	)
+	if err != nil {
+		return "", nil, false, err
+	}
+	return oldTopic, existing, true, nil
+}
+
 func (s *Store) MQTTTriggerSetEnabledByUser(id int64, userID string, enabled bool) (bool, error) {
 	res, err := s.db.Exec(
 		`UPDATE mqtt_triggers SET enabled = ? WHERE id = ? AND user_id = ?`,
