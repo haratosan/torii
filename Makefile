@@ -33,12 +33,20 @@ install: build
 	@echo "Installing torii..."
 	@mkdir -p "$(INSTALL_DIR)/extensions" "$(CONFIG_DIR)" "$(BIN_DIR)"
 	@cp torii "$(INSTALL_DIR)/torii"
-	@codesign -s - "$(INSTALL_DIR)/torii" 2>/dev/null || true
+	@# Stable codesign identifier so macOS TCC grants (e.g. Local Network on
+	@# Sequoia+) survive rebuilds. Without -i the identifier is derived from
+	@# the binary hash and changes every install, silently revoking previous
+	@# permissions.
+	@codesign -s - -i dev.harato.torii --force "$(INSTALL_DIR)/torii" 2>/dev/null || true
 	@for dir in extensions/*/; do \
 		name=$$(basename "$$dir"); \
 		mkdir -p "$(INSTALL_DIR)/extensions/$$name"; \
 		cp "$$dir/manifest.json" "$(INSTALL_DIR)/extensions/$$name/" 2>/dev/null || true; \
-		[ -x "$$dir/$$name" ] && cp "$$dir/$$name" "$(INSTALL_DIR)/extensions/$$name/" || true; \
+		if [ -x "$$dir/$$name" ]; then \
+			cp "$$dir/$$name" "$(INSTALL_DIR)/extensions/$$name/"; \
+			ext_short=$$(echo "$$name" | sed 's/^torii-//'); \
+			codesign -s - -i "dev.harato.torii.extensions.$$ext_short" --force "$(INSTALL_DIR)/extensions/$$name/$$name" 2>/dev/null || true; \
+		fi; \
 	done
 	@if [ ! -f "$(CONFIG_DIR)/config.yaml" ]; then \
 		cp config.yaml.example "$(CONFIG_DIR)/config.yaml"; \
