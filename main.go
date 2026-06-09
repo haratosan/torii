@@ -29,6 +29,7 @@ import (
 	"github.com/haratosan/torii/scheduler"
 	"github.com/haratosan/torii/session"
 	"github.com/haratosan/torii/store"
+	"github.com/haratosan/torii/tui"
 )
 
 // redactURL strips userinfo (user:password@host) from a URL before it goes
@@ -65,6 +66,9 @@ func main() {
 			return
 		case "logs":
 			cmd.Logs()
+			return
+		case "tui":
+			tui.Run(os.Args[2:])
 			return
 		default:
 			cmd.Usage()

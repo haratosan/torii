@@ -104,6 +104,13 @@ func (a *Agent) HandleCommand(msg channel.Message) (string, bool) {
 }
 
 func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentResponse, error) {
+	return a.HandleMessageWithSink(ctx, msg, nil)
+}
+
+// HandleMessageWithSink is HandleMessage plus an optional callback that
+// receives every tool_call / tool_result while the agent loop runs. A nil
+// sink is exactly equivalent to HandleMessage.
+func (a *Agent) HandleMessageWithSink(ctx context.Context, msg channel.Message, sink EventSink) (*AgentResponse, error) {
 	// Build user content, including reply context if present
 	content := msg.Text
 	if msg.ReplyText != "" {
@@ -187,10 +194,16 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 			}
 
 			a.logger.Info("tool call", "name", tc.Function.Name, "args", tc.Function.Arguments)
+			if sink != nil {
+				sink.ToolCall(ctx, tc.Function.Name, tc.Function.Arguments)
+			}
 
 			result, err := a.executor.Execute(ctx, tc.Function.Name, tc.Function.Arguments, toolChatID, msg.UserID, userImages)
 			if err != nil {
 				a.logger.Error("tool execution failed", "name", tc.Function.Name, "error", err)
+				if sink != nil {
+					sink.ToolResult(ctx, tc.Function.Name, "", err.Error())
+				}
 				a.sessions.Append(msg.ChatID, msg.UserID, llm.ChatMessage{
 					Role:       llm.RoleTool,
 					Content:    fmt.Sprintf("Error: %s", err),
@@ -210,6 +223,13 @@ func (a *Agent) HandleMessage(ctx context.Context, msg channel.Message) (*AgentR
 				logOutput = logOutput[:200] + "..."
 			}
 			a.logger.Info("tool result", "name", tc.Function.Name, "output", logOutput)
+			if sink != nil {
+				errStr := ""
+				if result.Error != "" {
+					errStr = result.Error
+				}
+				sink.ToolResult(ctx, tc.Function.Name, result.Output, errStr)
+			}
 
 			// Check for image_path and buttons in tool result data
 			if result.Data != nil {

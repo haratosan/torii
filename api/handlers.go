@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/haratosan/torii/agent"
 	"github.com/haratosan/torii/channel"
 	"github.com/haratosan/torii/extension"
 	"github.com/haratosan/torii/llm"
@@ -108,6 +110,19 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	requestID := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
 	chatID := fmt.Sprintf("api:%d:%s", apiUser.ID, requestID)
 
+	// toolChatID is the stable per-user identifier tools use for state that
+	// should persist across requests (sandbox container name, knowledge
+	// scope, ...). The session/chat-completion path needs the per-request
+	// chatID for ephemeral history isolation, but tools want continuity:
+	// running `sandbox` twice in the same TUI session should hit the same
+	// container, and linked-telegram users should share state with their
+	// phone session. Container names can't contain ":" — use it raw for
+	// linked users (numeric Telegram ID), or "api-<id>" otherwise.
+	toolChatID := apiUser.LinkedTelegramUserID
+	if toolChatID == "" {
+		toolChatID = fmt.Sprintf("api-%d", apiUser.ID)
+	}
+
 	// Build per-request tool policy. Default deny: only granted tools pass.
 	granted, err := s.db.GetAPIUserTools(apiUser.ID)
 	if err != nil {
@@ -135,17 +150,53 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	agent := s.agent.WithSessions(ephemeral)
+	ag := s.agent.WithSessions(ephemeral)
 	ctx := extension.WithAPIToolPolicy(r.Context(), policy)
 	ctx, cancel := context.WithTimeout(ctx, s.requestTimeout)
 	defer cancel()
 
-	result, err := agent.HandleMessage(ctx, channel.Message{
-		ChatID: chatID,
-		UserID: userID,
-		Text:   userText,
-	})
+	// Verbose-event mode is opt-in: the torii TUI sets X-Torii-Events: verbose
+	// (or ?events=verbose) to receive tool_call / tool_result frames
+	// interleaved with the normal content stream. OpenAI-typed clients omit
+	// the header and see byte-identical behavior to before.
+	verbose := req.Stream && isVerboseEventsRequested(r)
+
+	var sink agent.EventSink
+	var sseW *sseWriter
+	if verbose {
+		var err error
+		sseW, err = newSSEWriter(w)
+		if err != nil {
+			s.logger.Error("api: sse init", "error", err)
+			writeJSONError(w, http.StatusInternalServerError, "sse init: "+err.Error())
+			return
+		}
+		if err := sseW.writeBegin(requestID, s.cfg.ModelLabel); err != nil {
+			s.logger.Error("api: sse begin", "error", err)
+			return
+		}
+		sink = &sseEventSink{w: sseW, logger: s.logger}
+	}
+
+	result, err := ag.HandleMessageWithSink(ctx, channel.Message{
+		ChatID:     chatID,
+		ToolChatID: toolChatID,
+		UserID:     userID,
+		Text:       userText,
+	}, sink)
 	if err != nil {
+		if verbose {
+			// Stream is already open; deliver the error as a vendor frame and
+			// close gracefully. Don't try to write a JSON error body — the
+			// SSE response headers are already on the wire.
+			_ = sseW.writeVendorEvent(map[string]any{
+				"torii_event": "error",
+				"message":     err.Error(),
+			})
+			_ = sseW.writeEnd(requestID, s.cfg.ModelLabel)
+			s.logger.Error("api: agent run (verbose)", "error", err, "user", apiUser.Name)
+			return
+		}
 		s.logger.Error("api: agent run", "error", err, "user", apiUser.Name)
 		writeJSONError(w, http.StatusInternalServerError, "agent error: "+err.Error())
 		return
@@ -157,6 +208,17 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// clients tolerate empty content; OpenWebUI shows nothing, which
 		// matches the Telegram silence semantic.
 		final = ""
+	}
+
+	if verbose {
+		if err := sseW.writeContent(requestID, s.cfg.ModelLabel, final); err != nil {
+			s.logger.Error("api: sse content", "error", err)
+			return
+		}
+		if err := sseW.writeEnd(requestID, s.cfg.ModelLabel); err != nil {
+			s.logger.Error("api: sse end", "error", err)
+		}
+		return
 	}
 
 	if req.Stream {
@@ -203,4 +265,64 @@ func userIDForAPIUser(u *store.APIUser) string {
 	}
 	return fmt.Sprintf("api:%d", u.ID)
 }
+
+// isVerboseEventsRequested returns true if the client wants tool_call /
+// tool_result frames in the SSE stream. Accept either the X-Torii-Events
+// header or ?events=verbose query param so URL-only clients can opt in too.
+func isVerboseEventsRequested(r *http.Request) bool {
+	if strings.EqualFold(r.Header.Get("X-Torii-Events"), "verbose") {
+		return true
+	}
+	return strings.EqualFold(r.URL.Query().Get("events"), "verbose")
+}
+
+// maxToolArgDisplay caps the length of tool arguments echoed in vendor SSE
+// frames so a huge base64 payload doesn't blow up the TUI rendering pipeline.
+const maxToolArgDisplay = 400
+
+// maxToolOutputDisplay caps tool output the same way. The TUI shows a short
+// preview ("✓ tool succeeded") rather than the full result, which the user
+// will see embedded in the assistant's final answer anyway.
+const maxToolOutputDisplay = 400
+
+// sseEventSink implements agent.EventSink by writing torii_event vendor
+// frames to an open SSE response. Methods are nil-safe at the agent-loop
+// level (the loop checks for sink != nil before calling), so we don't repeat
+// that here.
+type sseEventSink struct {
+	w      *sseWriter
+	logger *slog.Logger
+}
+
+func (s *sseEventSink) ToolCall(_ context.Context, name, arguments string) {
+	args := arguments
+	if len(args) > maxToolArgDisplay {
+		args = args[:maxToolArgDisplay] + "…"
+	}
+	if err := s.w.writeVendorEvent(map[string]any{
+		"torii_event": "tool_call",
+		"name":        name,
+		"arguments":   args,
+	}); err != nil {
+		s.logger.Warn("sse vendor tool_call", "error", err)
+	}
+}
+
+func (s *sseEventSink) ToolResult(_ context.Context, name, output, errStr string) {
+	out := output
+	if len(out) > maxToolOutputDisplay {
+		out = out[:maxToolOutputDisplay] + "…"
+	}
+	if err := s.w.writeVendorEvent(map[string]any{
+		"torii_event": "tool_result",
+		"name":        name,
+		"output":      out,
+		"error":       errStr,
+	}); err != nil {
+		s.logger.Warn("sse vendor tool_result", "error", err)
+	}
+}
+
+// Compile-time assertion that the sink satisfies the agent's interface.
+var _ agent.EventSink = (*sseEventSink)(nil)
 

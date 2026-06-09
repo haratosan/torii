@@ -134,7 +134,33 @@ func (m *sandboxManager) resolveSharedDir() string {
 }
 
 func (m *sandboxManager) containerName(chatID string) string {
-	return containerPrefix + chatID
+	return containerPrefix + sanitizeContainerSuffix(chatID)
+}
+
+// sanitizeContainerSuffix replaces characters that container runtimes reject
+// in entity names. Apple's `container` CLI in particular refuses ":" with
+// "invalid entity name" — chat IDs from the OpenAI-compatible API used to
+// contain colons and broke sandbox-from-TUI. Keeping the rule strict
+// (only alnum, dash, underscore) means callers can't trip the next
+// surprise either.
+func sanitizeContainerSuffix(s string) string {
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z',
+			c >= 'A' && c <= 'Z',
+			c >= '0' && c <= '9',
+			c == '-' || c == '_':
+			out = append(out, c)
+		default:
+			out = append(out, '-')
+		}
+	}
+	if len(out) == 0 {
+		return "default"
+	}
+	return string(out)
 }
 
 // inspectContainer returns (exists, running) by inspecting the container

@@ -127,6 +127,7 @@ func Usage() {
 	fmt.Fprintf(os.Stderr, "  restart   Restart the torii service\n")
 	fmt.Fprintf(os.Stderr, "  status    Show service status\n")
 	fmt.Fprintf(os.Stderr, "  logs      Tail service logs\n")
+	fmt.Fprintf(os.Stderr, "  tui       Open the interactive terminal UI\n")
 	fmt.Fprintf(os.Stderr, "\nWithout a command, torii starts the bot directly.\n")
 	os.Exit(1)
 }
