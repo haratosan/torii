@@ -270,7 +270,7 @@ func main() {
 	// agent + channel into the mqtt_trigger builtin's dependencies.
 	var mqttSub *mqtt.Subscriber
 	if cfg.MQTT.Enabled {
-		mqttSub = mqtt.New(cfg.MQTT, db, ag, ch, logger)
+		mqttSub = mqtt.New(cfg.MQTT, db, ag, ch, cfg.Extensions.Dirs, logger)
 		registry.RegisterBuiltin(builtin.NewMQTTTriggerTool(db, mqttSub))
 	}
 
@@ -314,7 +314,7 @@ func main() {
 	defer cancel()
 
 	// Start scheduler in background
-	sched := scheduler.New(db, ch, ag, sessions, cfg.Scheduler.IntervalDuration(), logger)
+	sched := scheduler.New(db, ch, ag, sessions, cfg.Scheduler.IntervalDuration(), cfg.Extensions.Dirs, logger)
 	go sched.Run(ctx)
 
 	// Start MQTT subscriber in background (if enabled). On every (re)connect

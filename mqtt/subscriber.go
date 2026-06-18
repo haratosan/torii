@@ -31,11 +31,12 @@ import (
 const handleTimeout = 2 * time.Minute
 
 type Subscriber struct {
-	cfg     config.MQTTConfig
-	store   *store.Store
-	agent   *agent.Agent
-	channel channel.Channel
-	logger  *slog.Logger
+	cfg           config.MQTTConfig
+	store         *store.Store
+	agent         *agent.Agent
+	channel       channel.Channel
+	extensionDirs []string
+	logger        *slog.Logger
 
 	client paho.Client
 
@@ -44,14 +45,15 @@ type Subscriber struct {
 	runCtx context.Context  // long-lived; parent of every dispatched message ctx
 }
 
-func New(cfg config.MQTTConfig, db *store.Store, ag *agent.Agent, ch channel.Channel, logger *slog.Logger) *Subscriber {
+func New(cfg config.MQTTConfig, db *store.Store, ag *agent.Agent, ch channel.Channel, extensionDirs []string, logger *slog.Logger) *Subscriber {
 	return &Subscriber{
-		cfg:     cfg,
-		store:   db,
-		agent:   ag,
-		channel: ch,
-		logger:  logger,
-		subs:    map[int64]string{},
+		cfg:           cfg,
+		store:         db,
+		agent:         ag,
+		channel:       ch,
+		extensionDirs: extensionDirs,
+		logger:        logger,
+		subs:          map[int64]string{},
 	}
 }
 
@@ -240,7 +242,7 @@ func (s *Subscriber) dispatch(triggerID int64) paho.MessageHandler {
 			s.logger.Info("mqtt trigger silent", "trigger", t.Name, "topic", m.Topic())
 			return
 		}
-		if err := s.channel.Send(ctx, channel.Response{ChatID: t.ChatID, Text: result.Text}); err != nil {
+		if err := s.channel.Send(ctx, channel.Response{ChatID: t.ChatID, Text: result.Text, Buttons: result.Buttons, ImagePath: channel.ValidateImagePath(result.ImagePath, s.extensionDirs, s.logger)}); err != nil {
 			s.logger.Error("mqtt trigger: send", "trigger", t.Name, "error", err)
 		}
 	}

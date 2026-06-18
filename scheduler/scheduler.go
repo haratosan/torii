@@ -17,22 +17,24 @@ import (
 )
 
 type Scheduler struct {
-	store    *store.Store
-	channel  channel.Channel
-	agent    *agent.Agent
-	sessions *session.Store
-	interval time.Duration
-	logger   *slog.Logger
+	store         *store.Store
+	channel       channel.Channel
+	agent         *agent.Agent
+	sessions      *session.Store
+	interval      time.Duration
+	extensionDirs []string
+	logger        *slog.Logger
 }
 
-func New(db *store.Store, ch channel.Channel, ag *agent.Agent, sess *session.Store, interval time.Duration, logger *slog.Logger) *Scheduler {
+func New(db *store.Store, ch channel.Channel, ag *agent.Agent, sess *session.Store, interval time.Duration, extensionDirs []string, logger *slog.Logger) *Scheduler {
 	return &Scheduler{
-		store:    db,
-		channel:  ch,
-		agent:    ag,
-		sessions: sess,
-		interval: interval,
-		logger:   logger,
+		store:         db,
+		channel:       ch,
+		agent:         ag,
+		sessions:      sess,
+		interval:      interval,
+		extensionDirs: extensionDirs,
+		logger:        logger,
 	}
 }
 
@@ -107,7 +109,7 @@ func (s *Scheduler) handleCron(ctx context.Context, task *store.Task) {
 			Role:    llm.RoleAssistant,
 			Content: result.Text,
 		})
-		if err := s.channel.Send(ctx, channel.Response{ChatID: task.ChatID, Text: result.Text}); err != nil {
+		if err := s.channel.Send(ctx, channel.Response{ChatID: task.ChatID, Text: result.Text, Buttons: result.Buttons, ImagePath: channel.ValidateImagePath(result.ImagePath, s.extensionDirs, s.logger)}); err != nil {
 			s.logger.Error("scheduler: send cron result", "error", err, "task_id", task.ID)
 		}
 	}
