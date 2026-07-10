@@ -223,6 +223,7 @@ func main() {
 				Command:   s.Command,
 				Args:      s.Args,
 				URL:       s.URL,
+				Headers:   s.Headers,
 			}
 		}
 		mcpManager := mcp.NewManager(logger)

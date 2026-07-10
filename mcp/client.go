@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -27,12 +28,46 @@ func NewStdioClient(name string, command string, args []string) (*MCPClient, err
 }
 
 // NewSSEClient creates an MCP client that connects via HTTP SSE.
-func NewSSEClient(name string, url string) (*MCPClient, error) {
-	c, err := mcpclient.NewSSEMCPClient(url)
+// Deprecated by the MCP spec in favour of Streamable HTTP; kept for older servers.
+func NewSSEClient(name string, url string, headers map[string]string) (*MCPClient, error) {
+	var opts []transport.ClientOption
+	if len(headers) > 0 {
+		opts = append(opts, transport.WithHeaders(headers))
+	}
+	c, err := mcpclient.NewSSEMCPClient(url, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("sse client %s: %w", name, err)
 	}
 	return &MCPClient{name: name, client: c}, nil
+}
+
+// NewStreamableHTTPClient creates an MCP client that connects via Streamable HTTP,
+// the transport that supersedes SSE in the MCP spec.
+func NewStreamableHTTPClient(name string, url string, headers map[string]string) (*MCPClient, error) {
+	var opts []transport.StreamableHTTPCOption
+	if len(headers) > 0 {
+		opts = append(opts, transport.WithHTTPHeaders(headers))
+	}
+	c, err := mcpclient.NewStreamableHttpClient(url, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("streamable http client %s: %w", name, err)
+	}
+	return &MCPClient{name: name, client: c}, nil
+}
+
+// Start brings up the underlying transport. It must be called before Initialize:
+// the HTTP transports do not connect on construction, and SSE blocks in SendRequest
+// until Start has received the endpoint event.
+//
+// ctx must outlive the connection, not just the handshake — SSE ties its long-lived
+// event stream to it, and cancelling ctx drops the session. Start is idempotent, and
+// the stdio transport is already started by its constructor, so this is safe for all
+// three transports.
+func (m *MCPClient) Start(ctx context.Context) error {
+	if err := m.client.Start(ctx); err != nil {
+		return fmt.Errorf("start transport %s: %w", m.name, err)
+	}
+	return nil
 }
 
 // Initialize performs the MCP protocol handshake and discovers tools.

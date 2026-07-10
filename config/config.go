@@ -62,11 +62,12 @@ type MCPConfig struct {
 }
 
 type MCPServerConfig struct {
-	Name      string   `yaml:"name"`
-	Transport string   `yaml:"transport"` // "stdio" or "sse"
-	Command   string   `yaml:"command"`   // for stdio
-	Args      []string `yaml:"args"`      // for stdio
-	URL       string   `yaml:"url"`       // for sse
+	Name      string            `yaml:"name"`
+	Transport string            `yaml:"transport"` // "stdio", "http" (streamable) or "sse"
+	Command   string            `yaml:"command"`   // for stdio
+	Args      []string          `yaml:"args"`      // for stdio
+	URL       string            `yaml:"url"`       // for http and sse
+	Headers   map[string]string `yaml:"headers"`   // for http and sse; values expand ${ENV_VAR}
 }
 
 type GatewayConfig struct {
