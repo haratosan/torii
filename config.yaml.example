@@ -75,13 +75,22 @@ onboarding:
     - "Gibt es etwas, das ich über dich wissen sollte?"
 
 mcp:
+  # Tools are exposed to the LLM as "<server>__<tool>", e.g. lenzburg__write_mqtt,
+  # so two servers may publish the same tool names without shadowing each other.
   servers: []
   # - name: "filesystem"
   #   transport: "stdio"
   #   command: "npx"
   #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/path"]
-  # - name: "web-search"
-  #   transport: "sse"
+  #
+  # - name: "remote-tools"                  # streamable HTTP: the current MCP transport
+  #   transport: "http"
+  #   url: "https://example.com/mcp"
+  #   headers:                              # ${VAR} is read from the environment at
+  #     Authorization: "Bearer ${MY_TOKEN}"  # startup, so no secrets live in this file
+  #
+  # - name: "legacy-sse"                    # SSE: superseded by streamable HTTP,
+  #   transport: "sse"                      # only for servers that predate it
   #   url: "http://localhost:3001/sse"
 
 knowledge:
