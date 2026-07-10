@@ -4,8 +4,10 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -169,6 +171,75 @@ func TestTwoSitesRouteIndependently(t *testing.T) {
 
 		m.Shutdown()
 		cancel()
+	}
+}
+
+// startStreamableOn serves a fresh streamable-HTTP MCP server on the given listener.
+// A fresh server means a fresh session, exactly as a real server restart would.
+func startStreamableOn(ln net.Listener) *httptest.Server {
+	stream := mcpserver.NewStreamableHTTPServer(testMCPServer())
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(stream.ServeHTTP))
+	srv.Listener.Close()
+	srv.Listener = ln
+	srv.Start()
+	return srv
+}
+
+// A server that briefly goes offline (update, restart) must not permanently break the
+// connection: while down a call fails clearly, and once it returns a call reconnects and
+// succeeds — without reconfiguring or restarting torii.
+func TestReconnectAfterServerRestart(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	srv := startStreamableOn(ln)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	m := quietManager()
+	m.Start(ctx, []ServerConfig{{Name: "verify", Transport: "http", URL: srv.URL}})
+	defer m.Shutdown()
+
+	// Baseline: the connection works.
+	resp, err := m.Execute(ctx, "verify__ping", `{}`)
+	if err != nil || resp.Output != "pong" {
+		t.Fatalf("baseline Execute: err=%v output=%q", err, resp)
+	}
+
+	// Server goes offline. The call must fail clearly (not hang), and the client must be
+	// flagged unavailable so a reconnect is attempted rather than the dead transport reused.
+	srv.Close()
+	resp, err = m.Execute(ctx, "verify__ping", `{}`)
+	if err != nil {
+		t.Fatalf("Execute against down server returned a hard error: %v", err)
+	}
+	if !strings.Contains(resp.Error, "unreachable") {
+		t.Fatalf("down server: Error = %q, want it to mention 'unreachable'", resp.Error)
+	}
+	if m.servers["verify"].Available() {
+		t.Fatal("down server: client still reports Available() == true")
+	}
+
+	// Server comes back on the same address. The next call must reconnect and succeed.
+	ln2, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("re-listen on %s: %v", addr, err)
+	}
+	srv2 := startStreamableOn(ln2)
+	defer srv2.Close()
+
+	resp, err = m.Execute(ctx, "verify__ping", `{}`)
+	if err != nil {
+		t.Fatalf("Execute after restart: %v", err)
+	}
+	if resp.Error != "" {
+		t.Fatalf("Execute after restart returned error: %s", resp.Error)
+	}
+	if resp.Output != "pong" {
+		t.Fatalf("after restart: Output = %q, want \"pong\" (reconnect failed)", resp.Output)
 	}
 }
 

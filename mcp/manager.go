@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -40,6 +41,10 @@ type Manager struct {
 	toolMap map[string]toolRef
 	mu      sync.RWMutex
 	logger  *slog.Logger
+	// ctx is the long-lived parent context from Start, reused to re-dial a dropped
+	// connection. It must outlive every connection (SSE binds its event stream to it),
+	// which is why main passes context.Background().
+	ctx context.Context
 }
 
 // NewManager creates a new MCP manager.
@@ -73,6 +78,7 @@ func qualify(server, tool string) string {
 
 // Start initializes all configured MCP servers concurrently.
 func (m *Manager) Start(ctx context.Context, configs []ServerConfig) {
+	m.ctx = ctx
 	var wg sync.WaitGroup
 	for _, cfg := range configs {
 		wg.Add(1)
@@ -182,10 +188,11 @@ func (m *Manager) Tools() []llm.ToolDef {
 
 	var defs []llm.ToolDef
 	for serverName, client := range m.servers {
-		if !client.Available() {
+		available, tools := client.snapshot()
+		if !available {
 			continue
 		}
-		for _, t := range client.tools {
+		for _, t := range tools {
 			params := map[string]any{
 				"type":       t.InputSchema.Type,
 				"properties": t.InputSchema.Properties,
@@ -221,8 +228,17 @@ func (m *Manager) Execute(ctx context.Context, toolName string, input string) (*
 	client, ok := m.servers[ref.server]
 	m.mu.RUnlock()
 
-	if !ok || !client.Available() {
+	if !ok {
 		return nil, fmt.Errorf("mcp server %s not available", ref.server)
+	}
+
+	// A prior call may have left the connection flagged dead (server was offline).
+	// Try to rebuild it before giving up, so recovery does not require the LLM to
+	// happen to retry after the server came back.
+	if !client.Available() {
+		if rerr := client.reconnect(m.ctx); rerr != nil {
+			return &extension.ExtResponse{Error: fmt.Sprintf("mcp server %s unreachable: %v", ref.server, rerr)}, nil
+		}
 	}
 
 	var arguments map[string]any
@@ -234,6 +250,23 @@ func (m *Manager) Execute(ctx context.Context, toolName string, input string) (*
 
 	// The server knows the tool by its bare name, not the qualified one.
 	output, err := client.CallTool(ctx, ref.tool, arguments)
+	if err != nil {
+		// A transport error means the connection died mid-call (server restarted for an
+		// update, session invalidated). Rebuild it and retry the call once. The retry is
+		// safe for the offline-during-update case: the first attempt never reached the
+		// server. Caveat: if the server processed the call but the response was lost in
+		// transit, a write tool could fire twice — rare, and accepted for auto-retry.
+		var te *transportError
+		if errors.As(err, &te) {
+			m.logger.Warn("mcp call failed on dead transport, reconnecting", "server", ref.server, "error", err)
+			if rerr := client.reconnect(m.ctx); rerr != nil {
+				m.logger.Error("mcp reconnect failed", "server", ref.server, "error", rerr)
+				return &extension.ExtResponse{Error: fmt.Sprintf("mcp server %s unreachable: %v", ref.server, err)}, nil
+			}
+			m.logger.Info("mcp reconnected, retrying call", "server", ref.server)
+			output, err = client.CallTool(ctx, ref.tool, arguments)
+		}
+	}
 	if err != nil {
 		return &extension.ExtResponse{Error: err.Error()}, nil
 	}
